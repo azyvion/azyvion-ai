@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#041323">
+<meta name="description" content="Azyvion AI — Intelligence Beyond Limits.">
+<title>Azyvion AI — Intelligence Beyond Limits.</title>
+<link rel="icon" href="./favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="./logo.png">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="glow"></div>
+<header>
+  <a class="brand" href="./"><img src="./logo.png" alt="Azyvion" onerror="this.style.display='none'"><span>AZYVION <b>AI</b></span></a>
+  <div class="status"><i id="statusDot"></i><span id="statusText">Checking system</span></div>
+</header>
+<main>
+  <section class="welcome">
+    <div class="eyebrow">AZYVION / INTELLIGENCE LAYER</div>
+    <h1>Intelligence<br><em>Beyond Limits.</em></h1>
+    <p>A private AI interface built by Azyvion. Ask questions, explore ideas, write, analyze, and build.</p>
+  </section>
+  <section class="chat-shell">
+    <div class="messages" id="messages">
+      <div class="message assistant">
+        <div class="avatar">A</div>
+        <div class="bubble"><span class="label">AZYVION AI</span><p>Hey. I'm Azyvion AI. What are we building today?</p></div>
+      </div>
+    </div>
+    <div class="suggestions" id="suggestions">
+      <button>Give me a startup idea</button>
+      <button>Help me build a product</button>
+      <button>Explain AI simply</button>
+    </div>
+    <form class="composer" id="composer">
+      <textarea id="input" rows="1" placeholder="Message Azyvion AI..." autocomplete="off"></textarea>
+      <button type="submit" id="send">↑</button>
+    </form>
+    <div class="hint">Enter to send · Shift + Enter for a new line</div>
+  </section>
+</main>
+<footer>
+  <span>AZYVION AI</span>
+  <span>Technology Beyond Limits.</span>
+</footer>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
