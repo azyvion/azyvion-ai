@@ -6,5 +6,5 @@
 //   separately (Render, Railway, Fly.io, etc.): set this to that backend's
 //   full URL, e.g. "https://azyvion-ai.onrender.com" (no trailing slash).
 window.AZYVION_CONFIG = {
-  API_BASE_URL: "",
+  API_BASE_URL: "https://azyvion-ai.onrender.com",
 };
