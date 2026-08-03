@@ -29,13 +29,19 @@ app.use(express.json({ limit: "2mb" }));
 // what GitHub Pages serves independently in production.
 app.use(express.static("docs"));
 
-const client = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+// Groq's API is OpenAI-compatible, so we reuse the same "openai" SDK —
+// just pointed at Groq's endpoint with a Groq key. Free tier, no card
+// required. Get a key at https://console.groq.com/keys
+const client = process.env.GROQ_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: "https://api.groq.com/openai/v1",
+    })
   : null;
 
-// Set OPENAI_MODEL in .env to whichever model your OpenAI account has access
-// to. Defaults to the model originally configured for this project.
-const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+// Set GROQ_MODEL in .env to change models. llama-3.3-70b-versatile is a
+// solid free default; see https://console.groq.com/docs/models for others.
+const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 const SYSTEM_PROMPT = `You are Azyvion AI, the official AI assistant prototype of Azyvion.
 Be helpful, concise, intelligent, and natural.
@@ -53,7 +59,7 @@ app.post("/api/chat", async (req, res) => {
     if (!client) {
       return res
         .status(503)
-        .json({ error: "Azyvion AI is not configured yet. Add OPENAI_API_KEY to .env." });
+        .json({ error: "Azyvion AI is not configured yet. Add GROQ_API_KEY to .env." });
     }
 
     const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
@@ -72,13 +78,13 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "No valid message content was provided." });
     }
 
-    const response = await client.responses.create({
+    const completion = await client.chat.completions.create({
       model: MODEL,
-      instructions: SYSTEM_PROMPT,
-      input: cleaned,
+      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleaned],
     });
 
-    res.json({ text: response.output_text || "I couldn't generate a response." });
+    const text = completion.choices?.[0]?.message?.content || "I couldn't generate a response.";
+    res.json({ text });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Something went wrong while generating the response." });
