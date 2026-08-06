@@ -141,7 +141,7 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
 
   let cleaned = rawMessages
     .filter((m) => m && (m.role === "user" || m.role === "assistant"))
-    .slice(-20)
+    .slice(-10) // fewer turns = smaller prompt = more room under the 8000 TPM cap
     .map((m) => ({ role: m.role, content: cleanContent(m.content) }))
     .filter((m) => m.content !== null);
 
@@ -191,7 +191,11 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
       model,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleaned],
       stream: true,
-      max_completion_tokens: 8192,
+      // Your Groq org is on the on_demand (free) tier, capped at 8000
+      // tokens/minute TOTAL (prompt + completion combined) for
+      // openai/gpt-oss-120b. 8192 alone blew past that. 3000 leaves
+      // headroom for the system prompt + conversation history below.
+      max_completion_tokens: 3000,
       ...reasoningParams,
     });
 
