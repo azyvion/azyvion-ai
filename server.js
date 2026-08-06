@@ -70,14 +70,20 @@ const client = process.env.GROQ_API_KEY
     })
   : null;
 
-// Set GROQ_MODEL in .env to change models. llama-3.3-70b-versatile was
-// deprecated by Groq on 2026-06-17. openai/gpt-oss-120b was tried next but
-// has a known, unresolved Groq-side bug where it sometimes "thinks" and
-// never emits visible content (see
-// https://community.groq.com/t/gp120b-responses-only-contain-reasoning-tokens/759) —
-// no combination of reasoning params fixes it reliably. moonshotai/kimi-k2-instruct-0905
-// is a non-reasoning model, so this class of bug doesn't apply to it.
-const MODEL = process.env.GROQ_MODEL || "moonshotai/kimi-k2-instruct-0905";
+// Set GROQ_MODEL in .env to change models.
+// llama-3.3-70b-versatile / llama-3.1-8b-instant: deprecated by Groq
+// 2026-06-17, fully shut down 2026-08-16 — do not use.
+// moonshotai/kimi-k2-instruct-0905: deprecated by Groq 2026-03-23 in favor
+// of openai/gpt-oss-120b — no longer callable (404 model_not_found).
+// That leaves openai/gpt-oss-120b as Groq's de facto only current
+// production text model. It has a known, occasionally-reported bug where
+// it "thinks" and never emits visible content
+// (https://community.groq.com/t/gp120b-responses-only-contain-reasoning-tokens/759).
+// Since there's no viable alternative model to dodge it with anymore, we
+// mitigate instead: reasoning_effort: "low" (rather than omitting it) plus
+// extra max_completion_tokens headroom below, so the model has enough
+// budget to finish reasoning AND still write the visible answer.
+const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 // Used automatically whenever a message includes an image. Set
 // GROQ_VISION_MODEL in .env to override. See https://console.groq.com/docs/vision
@@ -164,12 +170,13 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
   const hasImages = cleaned.some((m) => Array.isArray(m.content));
   const model = hasImages ? VISION_MODEL : MODEL;
 
-  // Only the vision model (Qwen 3.6) is a reasoning model now — "none" is
-  // the value that disables its thinking mode. Note this value is ONLY
-  // valid for Qwen; GPT-OSS models only accept low/medium/high, which is
-  // part of why the previous default model needed replacing above.
-  // See https://console.groq.com/docs/reasoning
-  const reasoningParams = hasImages ? { reasoning_effort: "none" } : {};
+  // Both the text model (GPT-OSS 120B) and the vision model (Qwen 3.6) are
+  // reasoning models now. "none" only works on Qwen — GPT-OSS only accepts
+  // low/medium/high. Using "low" (not omitting the param) keeps GPT-OSS's
+  // thinking budget small, which helps avoid it spending all its tokens on
+  // reasoning and never writing a visible answer. See
+  // https://console.groq.com/docs/reasoning
+  const reasoningParams = { reasoning_effort: hasImages ? "none" : "low" };
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -184,7 +191,7 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
       model,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleaned],
       stream: true,
-      max_completion_tokens: 4096,
+      max_completion_tokens: 8192,
       ...reasoningParams,
     });
 
