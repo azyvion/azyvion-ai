@@ -6,14 +6,29 @@
 <meta name="theme-color" content="#02080f">
 <meta name="description" content="Azyvion AI — Intelligence Beyond Limits.">
 <title>Azyvion AI — Intelligence Beyond Limits.</title>
+
+<!-- PWA: manifest + iconos -->
+<link rel="manifest" href="./manifest.json">
+<meta name="app-version" content="3.0">
 <link rel="icon" href="./favicon.ico" sizes="any">
-<link rel="icon" type="image/png" href="./logo.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png">
+
+<!-- Android / Chrome -->
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- iOS: sin esto Safari no permite instalar como app de pantalla completa -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Azyvion AI">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <div class="app">
 
-  <button class="menu-toggle" id="menuToggle" aria-label="Toggle sidebar">
+  <button class="menu-toggle" id="menuToggle" aria-label="Toggle sidebar" aria-expanded="false" aria-controls="sidebar">
     <svg width="18" height="14" viewBox="0 0 18 14" fill="none"><path d="M1 1H17M1 7H17M1 13H17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
   </button>
 
@@ -27,7 +42,8 @@
     </button>
     <nav class="history" id="history" aria-label="Chat history"></nav>
     <div class="side-bottom">
-      <div class="status" id="statusWrap"><i id="statusDot"></i><span id="statusText">Checking system</span></div>
+      <div class="status" id="statusWrap" role="status" aria-live="polite"><i id="statusDot"></i><span id="statusText">Checking system</span></div>
+      <div class="app-version" id="appVersion">v3.0</div>
     </div>
   </aside>
 
@@ -35,7 +51,14 @@
 
   <main class="main">
     <div class="bg-grid"></div>
-    <div class="glow"></div>
+    <div class="beacon" aria-hidden="true">
+      <svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin meet" xmlns="http://www.w3.org/2000/svg">
+        <path class="r4" d="M120 600 L500 40 L880 600" stroke-width="2"/>
+        <path class="r3" d="M195 600 L500 130 L805 600" stroke-width="2"/>
+        <path class="r2" d="M270 600 L500 220 L730 600" stroke-width="2.5"/>
+        <path class="r1" d="M345 600 L500 310 L655 600" stroke-width="3"/>
+      </svg>
+    </div>
 
     <div class="thread" id="thread">
       <section class="welcome" id="welcome">
