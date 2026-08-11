@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.azyvion.ai",
+      "sha256_cert_fingerprints": [
+        "REEMPLAZA_ESTO_CON_LA_HUELLA_SHA256_QUE_TE_DA_PWABUILDER_O_BUBBLEWRAP"
+      ]
+    }
+  }
+]
