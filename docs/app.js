@@ -70,9 +70,13 @@ function renderHistory() {
   chats.forEach((c) => {
     const item = document.createElement("div");
     item.className = `h-item${c.id === activeId ? " active" : ""}`;
+    item.setAttribute("role", "button");
+    item.setAttribute("tabindex", "0");
+    item.setAttribute("aria-current", c.id === activeId ? "true" : "false");
     const label = document.createElement("span");
     label.textContent = c.title || "New chat";
-    const del = document.createElement("span");
+    const del = document.createElement("button");
+    del.type = "button";
     del.className = "del";
     del.setAttribute("aria-label", "Delete chat");
     del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
@@ -83,6 +87,12 @@ function renderHistory() {
     item.appendChild(label);
     item.appendChild(del);
     item.addEventListener("click", () => switchChat(c.id));
+    item.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        switchChat(c.id);
+      }
+    });
     historyEl.appendChild(item);
   });
 }
@@ -117,9 +127,11 @@ newChatBtn.addEventListener("click", () => {
 /* ---------- mobile sidebar ---------- */
 function openSidebar() {
   appEl.classList.add("sidebar-open");
+  menuToggle.setAttribute("aria-expanded", "true");
 }
 function closeSidebar() {
   appEl.classList.remove("sidebar-open");
+  menuToggle.setAttribute("aria-expanded", "false");
 }
 function closeSidebarOnMobile() {
   if (window.innerWidth <= 860) closeSidebar();
@@ -128,6 +140,9 @@ menuToggle.addEventListener("click", () => {
   appEl.classList.contains("sidebar-open") ? closeSidebar() : openSidebar();
 });
 scrim.addEventListener("click", closeSidebar);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && appEl.classList.contains("sidebar-open")) closeSidebar();
+});
 
 /* ---------- image attachments ---------- */
 attachBtn.addEventListener("click", () => fileInput.click());
@@ -204,6 +219,132 @@ input.addEventListener("paste", async (e) => {
   renderAttachPreview();
 });
 
+/* ---------- lightweight markdown renderer ----------
+   No CDN dependency (keeps this a zero-network-risk static file): a small,
+   self-escaping parser covering what model replies actually use — fenced
+   code blocks, inline code, bold/italic, links, lists, headings, quotes.
+   Everything is escaped before any tag is added, so this is safe against
+   HTML/script injection from model output. */
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function inlineMarkdown(text) {
+  let out = escapeHtml(text);
+  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return out;
+}
+
+function markdownToHtml(raw) {
+  const text = (raw || "").replace(/\r\n/g, "\n");
+  const blocks = [];
+  const codeFence = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
+  let last = 0,
+    m;
+  while ((m = codeFence.exec(text))) {
+    if (m.index > last) blocks.push({ type: "text", content: text.slice(last, m.index) });
+    blocks.push({ type: "code", lang: m[1], content: m[2].replace(/\n$/, "") });
+    last = codeFence.lastIndex;
+  }
+  if (last < text.length) blocks.push({ type: "text", content: text.slice(last) });
+
+  return blocks
+    .map((b) => {
+      if (b.type === "code") {
+        return `<div class="code-block"><div class="code-bar"><span>${escapeHtml(b.lang || "text")}</span><button type="button" class="copy-code" aria-label="Copy code">Copy</button></div><pre><code>${escapeHtml(b.content)}</code></pre></div>`;
+      }
+      return renderTextBlock(b.content);
+    })
+    .join("");
+}
+
+function renderTextBlock(text) {
+  const lines = text.split("\n");
+  const html = [];
+  let list = null; // { type: 'ul' | 'ol', items: [] }
+  let para = [];
+
+  const flushPara = () => {
+    if (para.length) {
+      html.push(`<p>${para.map(inlineMarkdown).join("<br>")}</p>`);
+      para = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      html.push(`<${list.type}>${list.items.map((i) => `<li>${inlineMarkdown(i)}</li>`).join("")}</${list.type}>`);
+      list = null;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    const ul = line.match(/^[-*]\s+(.*)$/);
+    const ol = line.match(/^\d+\.\s+(.*)$/);
+    const quote = line.match(/^>\s?(.*)$/);
+
+    if (!line) {
+      flushPara();
+      flushList();
+    } else if (heading) {
+      flushPara();
+      flushList();
+      const level = heading[1].length + 3; // h4-h6: stays subordinate to the UI's own headings
+      html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+    } else if (ul) {
+      flushPara();
+      if (!list || list.type !== "ul") {
+        flushList();
+        list = { type: "ul", items: [] };
+      }
+      list.items.push(ul[1]);
+    } else if (ol) {
+      flushPara();
+      if (!list || list.type !== "ol") {
+        flushList();
+        list = { type: "ol", items: [] };
+      }
+      list.items.push(ol[1]);
+    } else if (quote) {
+      flushPara();
+      flushList();
+      html.push(`<blockquote>${inlineMarkdown(quote[1])}</blockquote>`);
+    } else {
+      flushList();
+      para.push(line);
+    }
+  }
+  flushPara();
+  flushList();
+  return html.join("");
+}
+
+function attachCodeCopyHandlers(root) {
+  root.querySelectorAll(".copy-code").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const code = btn.closest(".code-block").querySelector("code").textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        const original = btn.textContent;
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.classList.remove("copied");
+        }, 1600);
+      });
+    });
+  });
+}
+
 /* ---------- message rendering ---------- */
 function renderMessages() {
   const chat = getActiveChat();
@@ -224,8 +365,22 @@ function appendMessageEl(role, content) {
   const imagesHtml = images.length
     ? `<div class="msg-images">${images.map((u) => `<img src="${u}" alt="Imagen adjunta">`).join("")}</div>`
     : "";
-  w.innerHTML = `<div class="avatar">${role === "assistant" ? "A" : "YOU"}</div><div class="bubble"><span class="label">${role === "assistant" ? "AZYVION AI" : "YOU"}</span>${imagesHtml}<p></p></div>`;
-  w.querySelector("p").textContent = text;
+  const bodyHtml = role === "assistant" ? markdownToHtml(text) : `<p>${escapeHtml(text)}</p>`;
+  const actionsHtml =
+    role === "assistant" && text
+      ? '<div class="msg-actions"><button type="button" class="copy-msg" aria-label="Copy message">Copy</button></div>'
+      : "";
+  w.innerHTML = `<div class="avatar">${role === "assistant" ? "A" : "YOU"}</div><div class="bubble"><span class="label">${role === "assistant" ? "AZYVION AI" : "YOU"}</span>${imagesHtml}<div class="content">${bodyHtml}</div>${actionsHtml}</div>`;
+  attachCodeCopyHandlers(w);
+  const copyMsgBtn = w.querySelector(".copy-msg");
+  if (copyMsgBtn) {
+    copyMsgBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(text).then(() => {
+        copyMsgBtn.textContent = "Copied";
+        setTimeout(() => (copyMsgBtn.textContent = "Copy"), 1600);
+      });
+    });
+  }
   messagesEl.appendChild(w);
   return w;
 }
@@ -281,6 +436,18 @@ function startStreamBubble() {
     finish() {
       w.classList.remove("streaming");
       cursor.remove();
+      const text = p.textContent;
+      if (text) {
+        p.outerHTML = `<div class="content">${markdownToHtml(text)}</div><div class="msg-actions"><button type="button" class="copy-msg" aria-label="Copy message">Copy</button></div>`;
+        attachCodeCopyHandlers(w);
+        const copyMsgBtn = w.querySelector(".copy-msg");
+        copyMsgBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(text).then(() => {
+            copyMsgBtn.textContent = "Copied";
+            setTimeout(() => (copyMsgBtn.textContent = "Copy"), 1600);
+          });
+        });
+      }
     },
   };
 }
@@ -294,32 +461,75 @@ function titleFrom(text) {
   return clean.length > 42 ? clean.slice(0, 42) + "…" : clean;
 }
 
-/* ---------- status ---------- */
-async function checkStatus() {
+/* ---------- status ----------
+   Render's free tier spins the backend down after inactivity, so the very
+   first check on page load can legitimately fail while it wakes up (can
+   take 30-50s). We used to lock into demo mode forever after one failed
+   check — now we retry with backoff and keep re-checking in the
+   background, so the moment the backend comes online the UI (and real
+   sending) recovers automatically instead of staying stuck on the canned
+   demo reply. */
+let statusRetryTimer = null;
+
+async function checkStatus(isRetry = false) {
   if (!API_BASE && window.location.protocol !== "http:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-    enterDemoMode("No backend configured for this deployment.");
+    enterDemoMode("No backend configured for this deployment.", true);
     return;
   }
+
+  if (!isRetry) {
+    statusText.textContent = "Checking system";
+    statusWrap.classList.remove("ready", "error");
+  }
+
   try {
     const r = await fetch(`${API_BASE}/api/status`);
     const d = await r.json();
+    clearTimeout(statusRetryTimer);
     if (d.configured) {
+      demoMode = false;
       statusText.textContent = "System online";
+      statusWrap.classList.remove("error");
       statusWrap.classList.add("ready");
     } else {
       statusText.textContent = "API key required";
+      statusWrap.classList.remove("ready");
       statusWrap.classList.add("error");
     }
   } catch {
-    enterDemoMode("Couldn't reach the Azyvion AI backend.");
+    enterDemoMode("Couldn't reach the Azyvion AI backend (it may be waking up).", false);
+    // Keep retrying in the background — covers Render cold starts and
+    // transient network blips — instead of giving up permanently.
+    clearTimeout(statusRetryTimer);
+    statusRetryTimer = setTimeout(() => checkStatus(true), 6000);
   }
 }
 
-function enterDemoMode(reason) {
+function enterDemoMode(reason, permanent) {
   demoMode = true;
-  statusText.textContent = "Demo mode — backend not connected";
+  statusText.textContent = permanent ? "Demo mode — backend not connected" : "Reconnecting…";
+  statusWrap.classList.remove("ready");
   statusWrap.classList.add("error");
   console.info(`Azyvion AI: ${reason} Set API_BASE_URL in config.js to connect a live backend.`);
+}
+
+// A Render free-tier backend that's asleep can reject or drop the very
+// first request while it spins up. One silent retry after a short pause
+// turns that into "worked, just a bit slower" instead of a visible error.
+async function fetchChatWithRetry(messages, attempt = 0) {
+  try {
+    return await fetch(`${API_BASE}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+    });
+  } catch (e) {
+    if (attempt === 0) {
+      await new Promise((res) => setTimeout(res, 2500));
+      return fetchChatWithRetry(messages, attempt + 1);
+    }
+    throw e;
+  }
 }
 
 /* ---------- sending ---------- */
@@ -352,7 +562,19 @@ async function sendMessage(text) {
 
   send.disabled = true;
 
-  if (demoMode) {
+  // demoMode is only a hint from the last background status check — it can
+  // be stale (e.g. the Render backend just finished waking up). Rather than
+  // trusting it blindly, only fall back to the canned reply if there's
+  // truly no backend configured for this deployment at all. Everything
+  // else gets a real attempt against /api/chat, so a backend that woke up
+  // since page load still works without a manual refresh.
+  const noBackendConfigured =
+    !API_BASE &&
+    window.location.protocol !== "http:" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1";
+
+  if (noBackendConfigured) {
     const reply = "This is a static preview — no backend is connected here. Deploy server.js (see README) and set API_BASE_URL in config.js to enable real responses.";
     await streamDemoReply(reply);
     chat.messages.push({ role: "assistant", content: reply });
@@ -366,11 +588,7 @@ async function sendMessage(text) {
   let stream = null;
   let full = "";
   try {
-    const r = await fetch(`${API_BASE}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chat.messages }),
-    });
+    const r = await fetchChatWithRetry(chat.messages);
     if (!r.ok) {
       let msg = "Request failed";
       try {
@@ -378,6 +596,11 @@ async function sendMessage(text) {
       } catch {}
       throw new Error(msg);
     }
+
+    demoMode = false;
+    statusText.textContent = "System online";
+    statusWrap.classList.remove("error");
+    statusWrap.classList.add("ready");
 
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
@@ -396,7 +619,15 @@ async function sendMessage(text) {
         const eventType = (lines.find((l) => l.startsWith("event: ")) || "").slice(7).trim();
         const dataLine = (lines.find((l) => l.startsWith("data: ")) || "").slice(6).trim();
         if (!dataLine) continue;
-        const payload = JSON.parse(dataLine);
+        let payload;
+        try {
+          payload = JSON.parse(dataLine);
+        } catch {
+          // A stray/partial chunk (network blip, proxy buffering during a
+          // Render cold start) shouldn't kill the whole in-progress reply —
+          // skip just this one event and keep streaming.
+          continue;
+        }
         if (eventType === "delta" && payload.text) {
           full += payload.text;
           stream.push(payload.text);
@@ -481,3 +712,177 @@ document.querySelectorAll(".suggestions button").forEach((b) =>
 renderHistory();
 renderMessages();
 checkStatus();
+
+/* =========================================================================
+   PWA — instalación + actualización forzada
+   ========================================================================= */
+
+const APP_VERSION = (window.AZYVION_CONFIG && window.AZYVION_CONFIG.APP_VERSION) || "0";
+const appVersionEl = document.getElementById("appVersion");
+if (appVersionEl) appVersionEl.textContent = `v${APP_VERSION}`;
+
+let swRegistration = null;
+let reloadingForUpdate = false;
+
+function isStandaloneApp() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true // iOS
+  );
+}
+
+// Recarga forzada, en el mismo espíritu de un Ctrl+Shift+R: se dispara sola
+// cuando detecta una versión nueva, sin pedirle nada al usuario.
+function forceReload() {
+  if (reloadingForUpdate) return;
+  reloadingForUpdate = true;
+  showUpdateToast();
+  setTimeout(() => window.location.reload(), 700);
+}
+
+function showUpdateToast() {
+  if (document.getElementById("updateToast")) return;
+  const t = document.createElement("div");
+  t.id = "updateToast";
+  t.className = "update-toast";
+  t.textContent = "Actualizando Azyvion AI a la nueva versión…";
+  document.body.appendChild(t);
+}
+
+// Compara version.json (siempre pedido a la red, nunca a caché) contra la
+// versión con la que se cargó esta pestaña. Es el respaldo que garantiza la
+// actualización incluso si, por lo que sea, el service worker no llega a
+// activarse a tiempo (primera visita, navegador sin soporte, etc).
+async function checkForNewVersion() {
+  try {
+    const r = await fetch(`./version.json?_=${Date.now()}`, { cache: "no-store" });
+    const d = await r.json();
+    if (d.version && d.version !== APP_VERSION) forceReload();
+  } catch {
+    /* sin conexión o bloqueado — se reintenta en el siguiente chequeo */
+  }
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    // updateViaCache: "none" evita que el navegador sirva un sw.js viejo
+    // desde su propia caché HTTP — siempre pide el archivo real a la red.
+    navigator.serviceWorker
+      .register("./sw.js", { updateViaCache: "none" })
+      .then((reg) => {
+        swRegistration = reg;
+        reg.update().catch(() => {});
+      })
+      .catch(() => {});
+  });
+
+  // Se dispara cuando un service worker nuevo toma el control de la
+  // página: es la señal de "ya hay versión nueva activa", y se recarga sola.
+  navigator.serviceWorker.addEventListener("controllerchange", forceReload);
+
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "SW_ACTIVATED" && event.data.version !== APP_VERSION) {
+      forceReload();
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (swRegistration) swRegistration.update().catch(() => {});
+    checkForNewVersion();
+  });
+
+  // Revisión periódica mientras la app queda abierta en segundo plano.
+  setInterval(() => {
+    if (swRegistration) swRegistration.update().catch(() => {});
+    checkForNewVersion();
+  }, 5 * 60 * 1000);
+}
+
+checkForNewVersion();
+
+/* ---------- banner de instalación ("agregar a inicio") ---------- */
+
+let deferredInstallPrompt = null;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+function installDismissedThisSession() {
+  try {
+    return sessionStorage.getItem("azyvion_install_dismissed") === "1";
+  } catch {
+    return false;
+  }
+}
+function markInstallDismissed() {
+  try {
+    sessionStorage.setItem("azyvion_install_dismissed", "1");
+  } catch {
+    /* sessionStorage no disponible — el banner podría repetirse, no es grave */
+  }
+}
+
+function showInstallBanner(platform) {
+  if (isStandaloneApp() || installDismissedThisSession()) return;
+  if (document.getElementById("installBanner")) return;
+
+  const banner = document.createElement("div");
+  banner.id = "installBanner";
+  banner.className = "install-banner";
+
+  if (platform === "ios") {
+    banner.innerHTML =
+      '<div class="install-banner-text">' +
+      "<strong>Instala Azyvion AI</strong>" +
+      '<span>Toca <b>Compartir</b> y luego <b>“Agregar a inicio”</b>.</span>' +
+      "</div>" +
+      '<button type="button" class="install-close" aria-label="Cerrar">✕</button>';
+  } else {
+    banner.innerHTML =
+      '<div class="install-banner-text">' +
+      "<strong>Instala Azyvion AI</strong>" +
+      "<span>Ábrela como app, más rápido, desde tu pantalla de inicio.</span>" +
+      "</div>" +
+      '<div class="install-banner-actions">' +
+      '<button type="button" class="install-btn">Instalar</button>' +
+      '<button type="button" class="install-close" aria-label="Cerrar">✕</button>' +
+      "</div>";
+  }
+
+  document.body.appendChild(banner);
+
+  banner.querySelector(".install-close").addEventListener("click", () => {
+    banner.remove();
+    markInstallDismissed();
+  });
+
+  const installBtn = banner.querySelector(".install-btn");
+  if (installBtn) {
+    installBtn.addEventListener("click", async () => {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      banner.remove();
+      markInstallDismissed();
+    });
+  }
+}
+
+// Android / Chrome / Edge: el navegador ofrece el evento de instalación.
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  showInstallBanner("android");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  markInstallDismissed();
+  const b = document.getElementById("installBanner");
+  if (b) b.remove();
+});
+
+// iOS Safari no dispara beforeinstallprompt — se muestran instrucciones manuales.
+if (isIOS && !isStandaloneApp()) {
+  showInstallBanner("ios");
+}
