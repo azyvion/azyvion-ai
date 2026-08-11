@@ -54,11 +54,15 @@ const dailyLimiter = rateLimit({
   message: { error: "Se alcanzó el límite diario de mensajes. Vuelve a intentarlo mañana." },
 });
 
-// Serves the static frontend too (index.html, app.js, styles.css, etc. all
-// live right here in the project root), so `npm start` gives you a full
-// working app locally at http://localhost:3000 — the same root folder is
-// what GitHub Pages serves independently in production.
-app.use(express.static(".", { index: "index.html" }));
+// Serves the static frontend too (index.html, app.js, styles.css, etc. live
+// in /docs), so `npm start` gives you a full working app locally at
+// http://localhost:3000 — the same /docs folder is what GitHub Pages serves
+// independently in production.
+// maxAge: 0 — sin esto, el navegador podría cachear index.html/app.js/sw.js
+// vía HTTP y el mecanismo de actualización forzada de la PWA (ver docs/sw.js)
+// no vería los cambios en local. En producción (GitHub Pages) esto no aplica
+// porque el frontend se sirve desde ahí, no desde este servidor.
+app.use(express.static("docs", { index: "index.html", maxAge: 0 }));
 
 // Groq's API is OpenAI-compatible, so we reuse the same "openai" SDK —
 // just pointed at Groq's endpoint with a Groq key. Free tier, no card
@@ -186,7 +190,9 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
   });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-  try {
+  // Runs one completion attempt and streams deltas as they arrive.
+  // Returns the full text so the caller can decide whether to retry.
+  async function runCompletion(reasoning) {
     const stream = await client.chat.completions.create({
       model,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleaned],
@@ -196,7 +202,7 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
       // openai/gpt-oss-120b. 8192 alone blew past that. 3000 leaves
       // headroom for the system prompt + conversation history below.
       max_completion_tokens: 3000,
-      ...reasoningParams,
+      reasoning_effort: reasoning,
     });
 
     let full = "";
@@ -209,13 +215,27 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
       }
       if (chunk.choices?.[0]?.finish_reason) lastFinishReason = chunk.choices[0].finish_reason;
     }
+    return { full, lastFinishReason };
+  }
+
+  try {
+    let { full, lastFinishReason } = await runCompletion(reasoningParams.reasoning_effort);
+
+    if (!full && !hasImages) {
+      // Known Groq bug (see comment above MODEL): gpt-oss-120b occasionally
+      // burns its whole budget "thinking" and emits no visible text. One
+      // retry at effort "none" (skip reasoning entirely) recovers most of
+      // these instead of showing the user a dead end.
+      console.warn(`Empty response from ${model} (finish_reason: ${lastFinishReason}). Retrying once with reasoning_effort=none.`);
+      ({ full, lastFinishReason } = await runCompletion("none"));
+    }
 
     if (!full) {
       // Diagnostic breadcrumb for Render logs — if this shows up, check
       // finish_reason: "length" means it ran out of tokens (raise
       // max_completion_tokens further), anything else points elsewhere.
-      console.warn(`Empty response from ${model}. finish_reason: ${lastFinishReason}`);
-      send("delta", { text: "I couldn't generate a response." });
+      console.warn(`Still empty from ${model} after retry. finish_reason: ${lastFinishReason}`);
+      send("delta", { text: "I couldn't generate a response. Please try again." });
     }
     send("done", {});
   } catch (e) {
