@@ -88,9 +88,9 @@ function saveChats() {
   queueCloudSync();
 }
 
-function createChat() {
+function createChat(projectId = null) {
   const id = `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  chats.unshift({ id, title: "New chat", messages: [] });
+  chats.unshift({ id, title: "New chat", messages: [], projectId: projectId || null });
   saveChats();
   return id;
 }
@@ -220,6 +220,7 @@ async function loadCloudChats() {
     else if (!chats.some((c) => c.id === activeId)) activeId = chats[0].id;
     saveChats();
     renderHistory();
+    renderProjects();
     renderMessages();
   } catch (err) {
     console.warn("Cloud history unavailable", err);
@@ -310,14 +311,15 @@ initializeAuth();
 /* ---------- sidebar rendering ---------- */
 function renderHistory() {
   historyEl.innerHTML = "";
-  if (!chats.length) {
+  const list = chats.filter((c) => !c.projectId);
+  if (!list.length) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
     empty.textContent = "No conversations yet.";
     historyEl.appendChild(empty);
     return;
   }
-  chats.forEach((c) => {
+  list.forEach((c) => {
     const item = document.createElement("div");
     item.className = `h-item${c.id === activeId ? " active" : ""}`;
     item.setAttribute("role", "button");
@@ -350,6 +352,7 @@ function renderHistory() {
 function switchChat(id) {
   activeId = id;
   renderHistory();
+  renderProjects();
   renderMessages();
   closeSidebarOnMobile();
 }
@@ -364,12 +367,14 @@ function deleteChat(id) {
     activeId = chats.length ? chats[0].id : createChat();
   }
   renderHistory();
+  renderProjects();
   renderMessages();
 }
 
 newChatBtn.addEventListener("click", () => {
   activeId = createChat();
   renderHistory();
+  renderProjects();
   renderMessages();
   closeSidebarOnMobile();
   input.focus();
@@ -510,7 +515,12 @@ function markdownToHtml(raw) {
   return blocks
     .map((b) => {
       if (b.type === "code") {
-        return `<div class="code-block"><div class="code-bar"><span>${escapeHtml(b.lang || "text")}</span><button type="button" class="copy-code" aria-label="Copy code">Copy</button></div><pre><code>${escapeHtml(b.content)}</code></pre></div>`;
+        const lang = (b.lang || "text").toLowerCase();
+        const showArtifact = ARTIFACT_LANGS.has(lang) || b.content.split("\n").length > 8;
+        const artifactBtn = showArtifact
+          ? '<button type="button" class="open-artifact" aria-label="Open in panel">Open</button>'
+          : "";
+        return `<div class="code-block" data-lang="${escapeHtml(lang)}"><div class="code-bar"><span>${escapeHtml(lang)}</span><div class="code-bar-actions">${artifactBtn}<button type="button" class="copy-code" aria-label="Copy code">Copy</button></div></div><pre><code>${escapeHtml(b.content)}</code></pre></div>`;
       }
       return renderTextBlock(b.content);
     })
@@ -579,6 +589,11 @@ function renderTextBlock(text) {
   return html.join("");
 }
 
+const ARTIFACT_LANGS = new Set([
+  "html", "svg", "xml", "css", "javascript", "js", "jsx", "tsx", "typescript",
+  "ts", "python", "py", "json", "markdown", "md", "react",
+]);
+
 function attachCodeCopyHandlers(root) {
   root.querySelectorAll(".copy-code").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -592,6 +607,14 @@ function attachCodeCopyHandlers(root) {
           btn.classList.remove("copied");
         }, 1600);
       });
+    });
+  });
+  root.querySelectorAll(".open-artifact").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const block = btn.closest(".code-block");
+      const lang = block.dataset.lang || "text";
+      const code = block.querySelector("code").textContent;
+      openArtifact(lang, code);
     });
   });
 }
@@ -773,17 +796,17 @@ function enterDemoMode(reason, permanent) {
 // A Render free-tier backend that's asleep can reject or drop the very
 // first request while it spins up. One silent retry after a short pause
 // turns that into "worked, just a bit slower" instead of a visible error.
-async function fetchChatWithRetry(messages, attempt = 0) {
+async function fetchChatWithRetry(messages, context, attempt = 0) {
   try {
     return await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, context }),
     });
   } catch (e) {
     if (attempt === 0) {
       await new Promise((res) => setTimeout(res, 2500));
-      return fetchChatWithRetry(messages, attempt + 1);
+      return fetchChatWithRetry(messages, context, attempt + 1);
     }
     throw e;
   }
@@ -845,7 +868,7 @@ async function sendMessage(text) {
   let stream = null;
   let full = "";
   try {
-    const r = await fetchChatWithRetry(chat.messages);
+    const r = await fetchChatWithRetry(chat.messages, buildContext(chat));
     if (!r.ok) {
       let msg = "Request failed";
       try {
@@ -951,7 +974,13 @@ composer.addEventListener("submit", (e) => {
 });
 
 input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (e.key !== "Enter") return;
+  if (settings.advanced.enterToSend) {
+    if (!e.shiftKey) {
+      e.preventDefault();
+      composer.requestSubmit();
+    }
+  } else if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
     composer.requestSubmit();
   }
@@ -966,7 +995,505 @@ document.querySelectorAll(".suggestions button").forEach((b) =>
   b.addEventListener("click", () => sendMessage(b.textContent))
 );
 
+/* =========================================================================
+   Settings — Diseño (personalización visual) + Avanzado
+   ========================================================================= */
+const SETTINGS_KEY = "azyvion_ai_settings_v1";
+const DESIGN_DEFAULTS = { blue: "#176eb1", cyan: "#00a9d9", bg: "#02080f", font: "DM Sans", radius: "default", density: "comfortable" };
+const ADVANCED_DEFAULTS = { customInstructions: "", enterToSend: true };
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      design: { ...DESIGN_DEFAULTS, ...(parsed.design || {}) },
+      advanced: { ...ADVANCED_DEFAULTS, ...(parsed.advanced || {}) },
+    };
+  } catch {
+    return { design: { ...DESIGN_DEFAULTS }, advanced: { ...ADVANCED_DEFAULTS } };
+  }
+}
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    /* storage unavailable — settings still apply for this session */
+  }
+}
+
+let settings = loadSettings();
+
+function applyDesign() {
+  const d = settings.design;
+  const root = document.documentElement;
+  root.style.setProperty("--blue", d.blue);
+  root.style.setProperty("--cyan", d.cyan);
+  root.style.setProperty("--bg", d.bg);
+  root.style.setProperty("--font-ui", `"${d.font}",sans-serif`);
+  document.body.dataset.radius = d.radius;
+  document.body.dataset.density = d.density;
+}
+applyDesign();
+
+function buildContext(chat) {
+  const parts = [];
+  if (settings.advanced.customInstructions && settings.advanced.customInstructions.trim()) {
+    parts.push(`User custom instructions:\n${settings.advanced.customInstructions.trim()}`);
+  }
+  if (chat && chat.projectId) {
+    const pc = projectContextFor(chat.projectId);
+    if (pc) parts.push(pc);
+  }
+  return parts.join("\n\n").slice(0, 4000);
+}
+
+const settingsOverlay = document.getElementById("settingsOverlay");
+const settingsBtn = document.getElementById("settingsBtn");
+
+function refreshSettingsForm() {
+  document.getElementById("designBlue").value = settings.design.blue;
+  document.getElementById("designCyan").value = settings.design.cyan;
+  document.getElementById("designBg").value = settings.design.bg;
+  document.getElementById("designFont").value = settings.design.font;
+  document.getElementById("designRadius").value = settings.design.radius;
+  document.getElementById("designDensity").value = settings.design.density;
+  document.getElementById("customInstructions").value = settings.advanced.customInstructions;
+  document.getElementById("enterToSend").checked = settings.advanced.enterToSend;
+}
+
+settingsBtn?.addEventListener("click", () => {
+  refreshSettingsForm();
+  settingsOverlay.hidden = false;
+});
+document.getElementById("settingsClose")?.addEventListener("click", () => {
+  settingsOverlay.hidden = true;
+});
+settingsOverlay?.addEventListener("click", (e) => {
+  if (e.target === settingsOverlay) settingsOverlay.hidden = true;
+});
+
+document.querySelectorAll(".settings-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".settings-tab").forEach((t) => {
+      t.classList.remove("active");
+      t.setAttribute("aria-selected", "false");
+    });
+    document.querySelectorAll(".settings-pane").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    tab.setAttribute("aria-selected", "true");
+    document.querySelector(`.settings-pane[data-pane="${tab.dataset.tab}"]`)?.classList.add("active");
+  });
+});
+
+document.getElementById("designBlue")?.addEventListener("input", (e) => {
+  settings.design.blue = e.target.value;
+  applyDesign();
+  saveSettings();
+});
+document.getElementById("designCyan")?.addEventListener("input", (e) => {
+  settings.design.cyan = e.target.value;
+  applyDesign();
+  saveSettings();
+});
+document.getElementById("designBg")?.addEventListener("input", (e) => {
+  settings.design.bg = e.target.value;
+  applyDesign();
+  saveSettings();
+});
+document.getElementById("designFont")?.addEventListener("change", (e) => {
+  settings.design.font = e.target.value;
+  applyDesign();
+  saveSettings();
+});
+document.getElementById("designRadius")?.addEventListener("change", (e) => {
+  settings.design.radius = e.target.value;
+  applyDesign();
+  saveSettings();
+});
+document.getElementById("designDensity")?.addEventListener("change", (e) => {
+  settings.design.density = e.target.value;
+  applyDesign();
+  saveSettings();
+});
+document.getElementById("designReset")?.addEventListener("click", () => {
+  settings.design = { ...DESIGN_DEFAULTS };
+  applyDesign();
+  saveSettings();
+  refreshSettingsForm();
+});
+
+document.getElementById("customInstructions")?.addEventListener("input", (e) => {
+  settings.advanced.customInstructions = e.target.value;
+  saveSettings();
+});
+document.getElementById("enterToSend")?.addEventListener("change", (e) => {
+  settings.advanced.enterToSend = e.target.checked;
+  saveSettings();
+});
+
+document.getElementById("exportDataBtn")?.addEventListener("click", () => {
+  const data = { chats, projects, settings, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `azyvion-ai-backup-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("importDataBtn")?.addEventListener("click", () => {
+  document.getElementById("importFileInput").click();
+});
+document.getElementById("importFileInput")?.addEventListener("change", async () => {
+  const fileInputEl = document.getElementById("importFileInput");
+  const file = fileInputEl.files?.[0];
+  fileInputEl.value = "";
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (Array.isArray(data.chats)) {
+      chats = data.chats;
+      saveChats();
+    }
+    if (Array.isArray(data.projects)) {
+      projects = data.projects;
+      saveProjects();
+    }
+    if (data.settings) {
+      settings = {
+        design: { ...DESIGN_DEFAULTS, ...(data.settings.design || {}) },
+        advanced: { ...ADVANCED_DEFAULTS, ...(data.settings.advanced || {}) },
+      };
+      applyDesign();
+      saveSettings();
+    }
+    activeId = chats.length ? chats[0].id : createChat();
+    renderHistory();
+    renderProjects();
+    renderMessages();
+    refreshSettingsForm();
+    alert("Datos importados correctamente.");
+  } catch (err) {
+    alert("No se pudo importar ese archivo: " + err.message);
+  }
+});
+
+document.getElementById("clearDataBtn")?.addEventListener("click", () => {
+  if (!confirm("Esto borrará permanentemente todos los chats, proyectos y ajustes guardados en este dispositivo. ¿Continuar?")) return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(PROJECTS_KEY);
+    localStorage.removeItem(SETTINGS_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  chats = [];
+  projects = [];
+  settings = loadSettings();
+  applyDesign();
+  activeId = createChat();
+  renderHistory();
+  renderProjects();
+  renderMessages();
+  refreshSettingsForm();
+});
+
+/* =========================================================================
+   Proyectos — carpeta + instrucciones/contexto propio + archivos adjuntos
+   ========================================================================= */
+const PROJECTS_KEY = "azyvion_ai_projects_v1";
+
+function loadProjects() {
+  try {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+function saveProjects() {
+  try {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  } catch {
+    /* storage unavailable — projects still work for this session */
+  }
+}
+
+let projects = loadProjects();
+
+function projectContextFor(projectId) {
+  const p = projects.find((x) => x.id === projectId);
+  if (!p) return "";
+  const parts = [];
+  if (p.instructions && p.instructions.trim()) {
+    parts.push(`Project instructions for "${p.name}":\n${p.instructions.trim()}`);
+  }
+  if (p.files && p.files.length) {
+    const filesText = p.files.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n");
+    parts.push(`Project files:\n${filesText}`);
+  }
+  return parts.join("\n\n");
+}
+
+const projectsListEl = document.getElementById("projectsList");
+
+function renderProjects() {
+  if (!projectsListEl) return;
+  projectsListEl.innerHTML = "";
+  if (!projects.length) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "No projects yet.";
+    projectsListEl.appendChild(empty);
+    return;
+  }
+  projects.forEach((p) => {
+    const item = document.createElement("div");
+    item.className = "project-item";
+
+    const row = document.createElement("div");
+    row.className = "project-row";
+    row.innerHTML = `
+      <button type="button" class="proj-toggle" aria-label="Toggle project">${p.expanded ? "▾" : "▸"}</button>
+      <span class="proj-name">${escapeHtml(p.name || "Untitled project")}</span>
+      <button type="button" class="proj-add" aria-label="New chat in project" title="New chat">+</button>
+      <button type="button" class="proj-edit" aria-label="Edit project" title="Edit">⚙</button>
+    `;
+    row.querySelector(".proj-toggle").addEventListener("click", () => {
+      p.expanded = !p.expanded;
+      saveProjects();
+      renderProjects();
+    });
+    row.querySelector(".proj-name").addEventListener("click", () => openProjectModal(p.id));
+    row.querySelector(".proj-edit").addEventListener("click", () => openProjectModal(p.id));
+    row.querySelector(".proj-add").addEventListener("click", () => {
+      activeId = createChat(p.id);
+      p.expanded = true;
+      saveProjects();
+      renderHistory();
+      renderProjects();
+      renderMessages();
+      closeSidebarOnMobile();
+      input.focus();
+    });
+    item.appendChild(row);
+
+    if (p.expanded) {
+      const projChats = chats.filter((c) => c.projectId === p.id);
+      const chatsWrap = document.createElement("div");
+      chatsWrap.className = "project-chats";
+      if (!projChats.length) {
+        const e = document.createElement("div");
+        e.className = "history-empty";
+        e.style.padding = "4px 10px";
+        e.textContent = "No chats yet.";
+        chatsWrap.appendChild(e);
+      }
+      projChats.forEach((c) => {
+        const ci = document.createElement("div");
+        ci.className = `h-item${c.id === activeId ? " active" : ""}`;
+        ci.setAttribute("role", "button");
+        ci.tabIndex = 0;
+        const label = document.createElement("span");
+        label.textContent = c.title || "New chat";
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "del";
+        del.setAttribute("aria-label", "Delete chat");
+        del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
+          deleteChat(c.id);
+        });
+        ci.appendChild(label);
+        ci.appendChild(del);
+        ci.addEventListener("click", () => switchChat(c.id));
+        ci.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            switchChat(c.id);
+          }
+        });
+        chatsWrap.appendChild(ci);
+      });
+      item.appendChild(chatsWrap);
+    }
+    projectsListEl.appendChild(item);
+  });
+}
+
+let editingProjectId = null;
+let pendingProjectFiles = [];
+const projectOverlay = document.getElementById("projectOverlay");
+
+function openProjectModal(id) {
+  editingProjectId = id || null;
+  const p = id ? projects.find((x) => x.id === id) : null;
+  document.getElementById("projectModalTitle").textContent = p ? "Edit project" : "New project";
+  document.getElementById("projectName").value = p ? p.name : "";
+  document.getElementById("projectInstructions").value = p ? p.instructions || "" : "";
+  pendingProjectFiles = p ? [...(p.files || [])] : [];
+  renderProjectFilesList();
+  document.getElementById("projectDeleteBtn").hidden = !p;
+  projectOverlay.hidden = false;
+}
+function closeProjectModal() {
+  projectOverlay.hidden = true;
+  editingProjectId = null;
+}
+
+function renderProjectFilesList() {
+  const wrap = document.getElementById("projectFilesList");
+  wrap.innerHTML = "";
+  pendingProjectFiles.forEach((f, i) => {
+    const row = document.createElement("div");
+    row.className = "project-file-row";
+    row.innerHTML = `<span>${escapeHtml(f.name)}</span><button type="button" class="rm-file" aria-label="Remove file">✕</button>`;
+    row.querySelector(".rm-file").addEventListener("click", () => {
+      pendingProjectFiles.splice(i, 1);
+      renderProjectFilesList();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+document.getElementById("newProjectBtn")?.addEventListener("click", () => openProjectModal(null));
+document.getElementById("projectModalClose")?.addEventListener("click", closeProjectModal);
+projectOverlay?.addEventListener("click", (e) => {
+  if (e.target === projectOverlay) closeProjectModal();
+});
+
+document.getElementById("projectFileBtn")?.addEventListener("click", () => {
+  document.getElementById("projectFileInput").click();
+});
+document.getElementById("projectFileInput")?.addEventListener("change", async () => {
+  const el = document.getElementById("projectFileInput");
+  const files = Array.from(el.files || []);
+  el.value = "";
+  for (const file of files) {
+    if (pendingProjectFiles.length >= 10) break;
+    try {
+      const text = await file.text();
+      pendingProjectFiles.push({ name: file.name, content: text.slice(0, 20000) });
+    } catch {
+      /* skip files that can't be read as text */
+    }
+  }
+  renderProjectFilesList();
+});
+
+document.getElementById("projectSaveBtn")?.addEventListener("click", () => {
+  const name = document.getElementById("projectName").value.trim() || "Untitled project";
+  const instructions = document.getElementById("projectInstructions").value;
+  if (editingProjectId) {
+    const p = projects.find((x) => x.id === editingProjectId);
+    if (p) {
+      p.name = name;
+      p.instructions = instructions;
+      p.files = [...pendingProjectFiles];
+    }
+  } else {
+    const id = `p_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    projects.unshift({ id, name, instructions, files: [...pendingProjectFiles], expanded: true });
+  }
+  saveProjects();
+  closeProjectModal();
+  renderProjects();
+});
+
+document.getElementById("projectDeleteBtn")?.addEventListener("click", () => {
+  if (!editingProjectId) return;
+  if (!confirm("Delete this project? Its chats will move to Recientes.")) return;
+  projects = projects.filter((p) => p.id !== editingProjectId);
+  chats.forEach((c) => {
+    if (c.projectId === editingProjectId) c.projectId = null;
+  });
+  saveProjects();
+  saveChats();
+  closeProjectModal();
+  renderProjects();
+  renderHistory();
+});
+
+/* =========================================================================
+   Artefactos — panel lateral para código/HTML/SVG generado por el modelo
+   ========================================================================= */
+const artifactPanel = document.getElementById("artifactPanel");
+const artifactCodeEl = document.getElementById("artifactCode");
+const artifactFrameEl = document.getElementById("artifactFrame");
+const artifactTitleEl = document.getElementById("artifactTitle");
+const artifactPreviewToggle = document.getElementById("artifactPreviewToggle");
+const PREVIEWABLE_ARTIFACTS = new Set(["html", "svg", "xml"]);
+const ARTIFACT_EXT = {
+  html: "html", svg: "svg", xml: "xml", css: "css", javascript: "js", js: "js",
+  jsx: "jsx", tsx: "tsx", typescript: "ts", ts: "ts", python: "py", py: "py",
+  json: "json", markdown: "md", md: "md", react: "jsx",
+};
+let currentArtifact = null;
+let artifactPreviewMode = false;
+
+function openArtifact(lang, code) {
+  currentArtifact = { lang, code };
+  artifactTitleEl.textContent = `Artifact · ${lang}`;
+  artifactCodeEl.querySelector("code").textContent = code;
+  const canPreview = PREVIEWABLE_ARTIFACTS.has(lang);
+  artifactPreviewToggle.hidden = !canPreview;
+  artifactPreviewMode = canPreview;
+  renderArtifactView();
+  artifactPanel.hidden = false;
+}
+
+function renderArtifactView() {
+  if (artifactPreviewMode && currentArtifact && PREVIEWABLE_ARTIFACTS.has(currentArtifact.lang)) {
+    artifactCodeEl.hidden = true;
+    artifactFrameEl.hidden = false;
+    const html =
+      currentArtifact.lang === "svg" || currentArtifact.lang === "xml"
+        ? `<!doctype html><html><body style="margin:0">${currentArtifact.code}</body></html>`
+        : currentArtifact.code;
+    artifactFrameEl.srcdoc = html;
+    artifactPreviewToggle.textContent = "View code";
+  } else {
+    artifactCodeEl.hidden = false;
+    artifactFrameEl.hidden = true;
+    artifactPreviewToggle.textContent = "Preview";
+  }
+}
+
+artifactPreviewToggle?.addEventListener("click", () => {
+  artifactPreviewMode = !artifactPreviewMode;
+  renderArtifactView();
+});
+document.getElementById("artifactCloseBtn")?.addEventListener("click", () => {
+  artifactPanel.hidden = true;
+});
+document.getElementById("artifactCopyBtn")?.addEventListener("click", (e) => {
+  if (!currentArtifact) return;
+  navigator.clipboard.writeText(currentArtifact.code).then(() => {
+    const btn = e.currentTarget;
+    const original = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => (btn.textContent = original), 1600);
+  });
+});
+document.getElementById("artifactDownloadBtn")?.addEventListener("click", () => {
+  if (!currentArtifact) return;
+  const ext = ARTIFACT_EXT[currentArtifact.lang] || "txt";
+  const blob = new Blob([currentArtifact.code], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `artifact.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
 renderHistory();
+renderProjects();
 renderMessages();
 checkStatus();
 
