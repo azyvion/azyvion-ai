@@ -4,7 +4,7 @@
 // Cambiar VERSION es lo que dispara todo el mecanismo de actualización:
 // crea una caché nueva, borra las cachés viejas, y avisa a las pestañas /
 // PWA abiertas para que se recarguen solas (como un Ctrl+Shift+R remoto).
-const VERSION = "3.0";
+const VERSION = "3.1";
 const CACHE_NAME = `azyvion-ai-cache-v${VERSION}`;
 
 // Solo se usan como respaldo offline — nunca como fuente principal.
