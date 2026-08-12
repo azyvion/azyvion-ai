@@ -1,5 +1,28 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut as firebaseSignOut,
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  serverTimestamp,
+  query,
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+
 const API_BASE = (window.AZYVION_CONFIG && window.AZYVION_CONFIG.API_BASE_URL) || "";
 const STORAGE_KEY = "azyvion_ai_chats_v1";
+const FIREBASE_CONFIG = window.AZYVION_CONFIG?.FIREBASE || {};
+const FIREBASE_ENABLED = Boolean(FIREBASE_CONFIG.apiKey && !String(FIREBASE_CONFIG.apiKey).startsWith("PASTE_"));
 
 const appEl = document.querySelector(".app"),
   menuToggle = document.getElementById("menuToggle"),
@@ -18,12 +41,28 @@ const appEl = document.querySelector(".app"),
   send = document.getElementById("send"),
   statusText = document.getElementById("statusText"),
   statusWrap = document.getElementById("statusWrap"),
-  suggestions = document.getElementById("suggestions");
+  suggestions = document.getElementById("suggestions"),
+  authOverlay = document.getElementById("authOverlay"),
+  googleSignInBtn = document.getElementById("googleSignIn"),
+  authNote = document.getElementById("authNote"),
+  accountAvatar = document.getElementById("accountAvatar"),
+  accountName = document.getElementById("accountName"),
+  accountEmail = document.getElementById("accountEmail"),
+  accountMenu = document.getElementById("accountMenu"),
+  accountPopover = document.getElementById("accountPopover"),
+  signOutBtn = document.getElementById("signOutBtn");
 
 const MAX_IMAGES = 5; // Groq's qwen3.6-27b vision model accepts up to 5 images per request
 let pendingImages = []; // [{ dataUrl, name }] queued for the next message
 
 let demoMode = false;
+let firebaseApp = null;
+let auth = null;
+let db = null;
+let currentUser = null;
+let cloudSyncReady = false;
+let authReady = false;
+let authRequired = FIREBASE_ENABLED;
 let chats = loadChats();
 let activeId = chats.length ? chats[0].id : createChat();
 
@@ -44,6 +83,7 @@ function saveChats() {
   } catch {
     /* storage unavailable — chat still works for this session */
   }
+  queueCloudSync();
 }
 
 function createChat() {
@@ -56,6 +96,198 @@ function createChat() {
 function getActiveChat() {
   return chats.find((c) => c.id === activeId);
 }
+
+/* ---------- authentication + cloud sync ---------- */
+function firebaseIsConfigured() {
+  return FIREBASE_ENABLED;
+}
+
+function showAuth(show, note = "Sign in with Google to sync your Azyvion AI conversations.") {
+  if (!authOverlay) return;
+  authOverlay.hidden = !show;
+  document.body.classList.toggle("auth-locked", show);
+  if (authNote) authNote.textContent = note;
+}
+
+function setAccount(user) {
+  if (!user) {
+    accountName.textContent = firebaseIsConfigured() ? "Signed out" : "Local mode";
+    accountEmail.textContent = firebaseIsConfigured() ? "Sign in to sync" : "Firebase not configured";
+    accountAvatar.textContent = "A";
+    accountAvatar.style.backgroundImage = "";
+    return;
+  }
+  accountName.textContent = user.displayName || "Azyvion user";
+  accountEmail.textContent = user.email || "Google account";
+  if (user.photoURL) {
+    accountAvatar.textContent = "";
+    accountAvatar.style.backgroundImage = `url(${JSON.stringify(user.photoURL)})`;
+  } else {
+    accountAvatar.style.backgroundImage = "";
+    accountAvatar.textContent = (user.displayName || "A").trim().charAt(0).toUpperCase() || "A";
+  }
+}
+
+function cleanForCloud(content) {
+  if (typeof content === "string") return content.slice(0, 120000);
+  if (!Array.isArray(content)) return "";
+  const text = content.filter((p) => p && p.type === "text").map((p) => p.text || "").join("\n");
+  const imageCount = content.filter((p) => p && p.type === "image_url").length;
+  return imageCount ? `${text}${text ? "\n\n" : ""}[${imageCount} image${imageCount > 1 ? "s" : ""} attached]` : text;
+}
+
+function cloudChat(chat) {
+  return {
+    title: (chat.title || "New chat").slice(0, 120),
+    messages: (chat.messages || []).slice(-100).map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: cleanForCloud(m.content),
+    })),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+let cloudSyncTimer = null;
+const cloudSyncQueue = new Set();
+function queueCloudSync(chatId = activeId) {
+  if (!cloudSyncReady || !currentUser || !chatId) return;
+  cloudSyncQueue.add(chatId);
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(flushCloudSync, 500);
+}
+
+async function flushCloudSync() {
+  if (!cloudSyncReady || !currentUser || !db) return;
+  const ids = [...cloudSyncQueue];
+  cloudSyncQueue.clear();
+  for (const id of ids) {
+    const chat = chats.find((c) => c.id === id);
+    if (!chat) continue;
+    try {
+      await setDoc(doc(db, "users", currentUser.uid, "chats", id), cloudChat(chat), { merge: true });
+    } catch (err) {
+      console.warn("Cloud sync failed", err);
+    }
+  }
+}
+
+async function deleteCloudChat(id) {
+  if (!cloudSyncReady || !currentUser || !db) return;
+  try {
+    await deleteDoc(doc(db, "users", currentUser.uid, "chats", id));
+  } catch (err) {
+    console.warn("Cloud delete failed", err);
+  }
+}
+
+async function loadCloudChats() {
+  if (!cloudSyncReady || !currentUser || !db) return;
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "chats")));
+    const cloud = [];
+    snap.forEach((d) => {
+      const data = d.data() || {};
+      cloud.push({
+        id: d.id,
+        title: data.title || "New chat",
+        messages: Array.isArray(data.messages) ? data.messages.map((m) => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: typeof m.content === "string" ? m.content : "",
+        })) : [],
+      });
+    });
+    const byId = new Map(chats.map((c) => [c.id, c]));
+    for (const c of cloud) byId.set(c.id, c);
+    chats = [...byId.values()].sort((a, b) => (b.id || "").localeCompare(a.id || ""));
+    if (!chats.length) activeId = createChat();
+    else if (!chats.some((c) => c.id === activeId)) activeId = chats[0].id;
+    saveChats();
+    renderHistory();
+    renderMessages();
+  } catch (err) {
+    console.warn("Cloud history unavailable", err);
+  }
+}
+
+async function signInGoogle() {
+  if (!auth) {
+    showAuth(true, "Add your Firebase web configuration in docs/config.js first.");
+    return;
+  }
+  googleSignInBtn.disabled = true;
+  googleSignInBtn.classList.add("loading");
+  authNote.textContent = "Opening Google sign-in…";
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  try {
+    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isMobile) await signInWithRedirect(auth, provider);
+    else await signInWithPopup(auth, provider);
+  } catch (err) {
+    console.error(err);
+    authNote.textContent = friendlyAuthError(err);
+    googleSignInBtn.disabled = false;
+    googleSignInBtn.classList.remove("loading");
+  }
+}
+
+function friendlyAuthError(err) {
+  const code = err?.code || "";
+  if (code.includes("popup-closed-by-user")) return "Google sign-in was closed. Try again when you're ready.";
+  if (code.includes("unauthorized-domain")) return "This domain is not authorized in Firebase. Add your GitHub Pages domain under Authentication → Settings → Authorized domains.";
+  if (code.includes("operation-not-allowed")) return "Google sign-in is not enabled in your Firebase project yet.";
+  return "Google sign-in failed. Check the Firebase setup and try again.";
+}
+
+async function initializeAuth() {
+  if (!firebaseIsConfigured()) {
+    authRequired = false;
+    authReady = true;
+    setAccount(null);
+    return;
+  }
+  try {
+    firebaseApp = initializeApp(FIREBASE_CONFIG);
+    auth = getAuth(firebaseApp);
+    db = getFirestore(firebaseApp);
+    await getRedirectResult(auth).catch((err) => console.warn("Redirect sign-in", err));
+    onAuthStateChanged(auth, async (user) => {
+      currentUser = user;
+      authReady = true;
+      if (user) {
+        cloudSyncReady = true;
+        setAccount(user);
+        showAuth(false);
+        await loadCloudChats();
+        setStatus("ready", "Signed in");
+      } else {
+        cloudSyncReady = false;
+        setAccount(null);
+        showAuth(true);
+        setStatus("ready", "Sign in required");
+      }
+    });
+  } catch (err) {
+    console.error("Firebase initialization failed", err);
+    authRequired = false;
+    authReady = true;
+    setAccount(null);
+    authNote.textContent = "Firebase could not initialize. Local mode is still available.";
+  }
+}
+
+googleSignInBtn?.addEventListener("click", signInGoogle);
+accountMenu?.addEventListener("click", () => {
+  accountPopover.hidden = !accountPopover.hidden;
+});
+signOutBtn?.addEventListener("click", async () => {
+  accountPopover.hidden = true;
+  if (auth) await firebaseSignOut(auth).catch(console.warn);
+});
+document.addEventListener("click", (event) => {
+  if (!accountPopover.hidden && !accountPopover.contains(event.target) && event.target !== accountMenu) accountPopover.hidden = true;
+});
+initializeAuth();
 
 /* ---------- sidebar rendering ---------- */
 function renderHistory() {
@@ -109,6 +341,7 @@ function deleteChat(id) {
   if (idx === -1) return;
   chats.splice(idx, 1);
   saveChats();
+  deleteCloudChat(id);
   if (activeId === id) {
     activeId = chats.length ? chats[0].id : createChat();
   }
