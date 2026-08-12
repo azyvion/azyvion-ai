@@ -1,6 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=Newsreader:ital,wght@0,500;1,600&display=swap');
 
-:root{--bg:#02080f;--panel:rgba(4,19,35,.78);--line:rgba(239,241,243,.1);--text:#eff1f3;--muted:#82909e;--blue:#176eb1;--cyan:#00a9d9;--sidebar-w:264px}
+:root{--bg:#02080f;--panel:rgba(4,19,35,.78);--line:rgba(239,241,243,.1);--text:#eff1f3;--muted:#82909e;--blue:#176eb1;--cyan:#00a9d9;--sidebar-w:264px;--light-bg:#eff1f3;--light-panel:#ffffff;--light-border:rgba(4,19,35,.1);--light-text:#0c1b28;--light-muted:#5b6b78}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font-family:"DM Sans",sans-serif;overflow:hidden}
@@ -57,14 +57,19 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:"DM Sans",sans-
 @keyframes beam{0%,100%{opacity:.5;transform:translateY(0)}50%{opacity:1;transform:translateY(-6px)}}
 
 .thread{flex:1;overflow-y:auto;position:relative;z-index:1;padding:60px 0 20px}
-.welcome{text-align:center;max-width:640px;margin:20px auto 40px;padding:0 20px}
-.eyebrow{font-size:10px;letter-spacing:.22em;color:#60707e;font-weight:700;margin-bottom:20px}
-.welcome h1{font:800 clamp(38px,6vw,64px)/.95 "Manrope";letter-spacing:-.06em;margin:0}
-.welcome h1 em{font-style:normal;color:#76d9ff}
-.welcome>p{max-width:520px;margin:22px auto 0;color:var(--muted);font-size:14px}
-.suggestions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:26px}
-.suggestions button{background:transparent;color:#91a0ad;border:1px solid var(--line);border-radius:999px;padding:9px 14px;font:12px "DM Sans";cursor:pointer}
-.suggestions button:hover{color:#fff;border-color:rgba(0,169,217,.45)}
+
+/* welcome: light card (tema claro), estilo Claude.ai, sobre el fondo oscuro del resto de la app */
+.welcome{text-align:center;max-width:660px;margin:20px auto 40px;padding:46px 40px 42px;background:var(--light-bg);border:1px solid var(--light-border);border-radius:26px;box-shadow:0 30px 90px rgba(4,19,35,.4);color:var(--light-text)}
+.welcome-greet{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.welcome-mark{width:30px;height:30px;flex:0 0 auto;display:inline-flex}
+.welcome-mark svg{width:100%;height:100%}
+.welcome h1{font:500 clamp(28px,4.2vw,42px)/1.08 "Newsreader",serif;letter-spacing:-.01em;margin:0;color:var(--light-text)}
+.welcome h1 em{font-style:italic;font-weight:600;color:var(--blue)}
+.welcome>p{max-width:460px;margin:18px auto 0;color:var(--light-muted);font-size:14px;line-height:1.6}
+.suggestions{display:flex;gap:9px;flex-wrap:wrap;justify-content:center;margin-top:28px}
+.suggestions button{display:inline-flex;align-items:center;gap:7px;background:var(--light-panel);color:#33424c;border:1px solid var(--light-border);border-radius:999px;padding:10px 15px;font:600 12.5px "DM Sans";cursor:pointer;box-shadow:0 1px 2px rgba(4,19,35,.05)}
+.suggestions button svg{flex:0 0 auto;color:var(--blue)}
+.suggestions button:hover{color:var(--light-text);border-color:rgba(23,110,177,.5);background:#fbfcfd}
 
 .messages{max-width:820px;margin:0 auto;padding:0 24px}
 .message{display:flex;gap:13px;margin-bottom:24px;animation:rise .3s ease both}
@@ -126,12 +131,13 @@ a:focus-visible,button:focus-visible,textarea:focus-visible,.h-item:focus-visibl
 .attach-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .attach-thumb .rm{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:5px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;display:grid;place-items:center;cursor:pointer}
 
-.composer{display:flex;align-items:flex-end;gap:8px;padding:10px;border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(20px);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
-.attach-btn{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:11px;background:transparent;color:#91a0ad;cursor:pointer;display:grid;place-items:center}
-.attach-btn:hover{background:rgba(255,255,255,.06);color:#fff}
-textarea{resize:none;flex:1;border:0;outline:0;background:transparent;color:#fff;font:14px "DM Sans";padding:10px;max-height:150px}
-textarea::placeholder{color:#596875}
-.composer button[type="submit"]{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:11px;background:var(--text);color:#041323;font-size:18px;cursor:pointer;display:grid;place-items:center}
+.composer{display:flex;align-items:flex-end;gap:8px;padding:10px;border:1px solid var(--light-border);background:var(--light-panel);border-radius:18px;box-shadow:0 20px 60px rgba(4,19,35,.4)}
+.attach-btn{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:11px;background:transparent;color:var(--light-muted);cursor:pointer;display:grid;place-items:center}
+.attach-btn:hover{background:rgba(4,19,35,.06);color:var(--light-text)}
+textarea{resize:none;flex:1;border:0;outline:0;background:transparent;color:var(--light-text);font:14px "DM Sans";padding:10px;max-height:150px}
+textarea::placeholder{color:#8b98a3}
+.composer button[type="submit"]{flex:0 0 auto;width:38px;height:38px;border:0;border-radius:11px;background:var(--blue);color:#fff;font-size:18px;cursor:pointer;display:grid;place-items:center}
+.composer button[type="submit"]:hover{background:#1c7ec2}
 .composer button:disabled{opacity:.45;cursor:default}
 .hint{text-align:center;color:#4f5d68;font-size:9px;letter-spacing:.08em;padding:10px 0 0}
 
