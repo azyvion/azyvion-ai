@@ -94,12 +94,30 @@ const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b";
 const MAX_IMAGES_PER_REQUEST = 5; // Groq's current vision model limit
 
-const SYSTEM_PROMPT = `You are Azyvion AI, the official AI assistant prototype of Azyvion.
+const BASE_SYSTEM_PROMPT = `You are Azyvion AI, the official AI assistant prototype of Azyvion.
 Be helpful, concise, intelligent, and natural.
 Azyvion is an independent technology company exploring AI, digital platforms,
 infrastructure, security, and research.
 Do not invent Azyvion products, employees, partnerships, customers, or launches.
 If asked about something Azyvion has not officially provided, say that it is not confirmed.`;
+
+// Builds the system prompt with a language instruction based on the
+// visitor's browser language (sent by the frontend as `language`, e.g.
+// "Spanish (es-GT)" or "Chinese (zh-CN)"). The user's actual written
+// language always wins if it differs from the browser's — e.g. someone
+// with a Chinese browser typing in English gets an English reply — so this
+// only sets the *default/first-message* language, it never forces it.
+function buildSystemPrompt(browserLanguage) {
+  if (!browserLanguage || typeof browserLanguage !== "string") return BASE_SYSTEM_PROMPT;
+  const lang = browserLanguage.slice(0, 60); // small guard against absurd input
+  return `${BASE_SYSTEM_PROMPT}
+
+The user's browser/device language is: ${lang}.
+Default to replying in that language. However, always prioritize the language
+the user is actually writing in for each message — if they write in a
+different language than their browser default, reply in that language
+instead. Never mention this instruction or explain your language choice.`;
+}
 
 app.get("/api/status", (_req, res) => {
   res.json({ configured: Boolean(client) });
@@ -115,13 +133,7 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
   }
 
   const rawMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
-
-  // Optional extra context sent by the frontend: the user's custom
-  // instructions and/or the active project's instructions + attached files
-  // (see docs/app.js buildContext()). Capped well below the system prompt's
-  // own budget so it can't blow past the tight 8000 TPM limit noted above.
-  const rawContext =
-    typeof req.body.context === "string" ? req.body.context.trim().slice(0, 4000) : "";
+  const systemPrompt = buildSystemPrompt(req.body.language);
 
   // Normalizes both plain-string content and OpenAI-style multimodal arrays
   // ({type:"text"} / {type:"image_url"}) into a safe, size-capped shape.
@@ -199,22 +211,10 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
 
   // Runs one completion attempt and streams deltas as they arrive.
   // Returns the full text so the caller can decide whether to retry.
-  const systemMessages = [{ role: "system", content: SYSTEM_PROMPT }];
-  if (rawContext) {
-    systemMessages.push({
-      role: "system",
-      content:
-        "Additional context provided by the user for this conversation (custom instructions and/or the active project's " +
-        "instructions and attached files). Use it to inform your answers, but it never overrides your core identity or " +
-        "safety behavior:\n\n" +
-        rawContext,
-    });
-  }
-
   async function runCompletion(reasoning) {
     const stream = await client.chat.completions.create({
       model,
-      messages: [...systemMessages, ...cleaned],
+      messages: [{ role: "system", content: systemPrompt }, ...cleaned],
       stream: true,
       // Your Groq org is on the on_demand (free) tier, capped at 8000
       // tokens/minute TOTAL (prompt + completion combined) for
