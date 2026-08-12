@@ -61,6 +61,7 @@ const appEl = document.querySelector(".app"),
   authOverlay = document.getElementById("authOverlay"),
   googleSignInBtn = document.getElementById("googleSignIn"),
   guestSignInBtn = document.getElementById("guestSignIn"),
+  authCloseBtn = document.getElementById("authClose"),
   authNote = document.getElementById("authNote"),
   accountCard = document.getElementById("accountCard"),
   accountAvatar = document.getElementById("accountAvatar"),
@@ -344,7 +345,11 @@ async function initializeAuth() {
 }
 
 googleSignInBtn?.addEventListener("click", signInGoogle);
-guestSignInBtn?.addEventListener("click", () => {
+function dismissAuthOverlay() {
+  // Closing the overlay (✕) has the same effect as "Continue without an
+  // account": there's no third state in this app between "signed in" and
+  // "local mode", so dismissing it just puts you in local mode until you
+  // choose to sign in again from the account card.
   try {
     sessionStorage.setItem("azyvion_guest_mode", "1");
   } catch {
@@ -352,7 +357,9 @@ guestSignInBtn?.addEventListener("click", () => {
   }
   showAuth(false);
   setStatus("ready", "Local mode");
-});
+}
+guestSignInBtn?.addEventListener("click", dismissAuthOverlay);
+authCloseBtn?.addEventListener("click", dismissAuthOverlay);
 function openAccountAction() {
   if (currentUser) {
     accountPopover.hidden = !accountPopover.hidden;
