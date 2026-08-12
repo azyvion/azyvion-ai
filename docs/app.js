@@ -42,6 +42,7 @@ const appEl = document.querySelector(".app"),
   statusText = document.getElementById("statusText"),
   statusWrap = document.getElementById("statusWrap"),
   suggestions = document.getElementById("suggestions"),
+  welcomeGreeting = document.getElementById("welcomeGreeting"),
   authOverlay = document.getElementById("authOverlay"),
   googleSignInBtn = document.getElementById("googleSignIn"),
   authNote = document.getElementById("authNote"),
@@ -116,6 +117,7 @@ function setAccount(user) {
     accountEmail.textContent = firebaseIsConfigured() ? "Sign in to sync" : "Firebase not configured";
     accountAvatar.textContent = "A";
     accountAvatar.style.backgroundImage = "";
+    updateWelcomeGreeting(null);
     return;
   }
   accountName.textContent = user.displayName || "Azyvion user";
@@ -127,6 +129,20 @@ function setAccount(user) {
     accountAvatar.style.backgroundImage = "";
     accountAvatar.textContent = (user.displayName || "A").trim().charAt(0).toUpperCase() || "A";
   }
+  updateWelcomeGreeting(user);
+}
+
+function updateWelcomeGreeting(user) {
+  if (!welcomeGreeting) return;
+  if (!user) {
+    welcomeGreeting.innerHTML = 'Welcome to <em>Azyvion AI</em>';
+    return;
+  }
+  const firstName = (user.displayName || "").trim().split(/\s+/)[0];
+  const hasHistory = chats.some((c) => (c.messages || []).length > 0);
+  if (firstName && hasHistory) welcomeGreeting.innerHTML = `<em>${firstName}</em> is back!`;
+  else if (firstName) welcomeGreeting.innerHTML = `Welcome, <em>${firstName}</em>!`;
+  else welcomeGreeting.innerHTML = 'Welcome to <em>Azyvion AI</em>';
 }
 
 function cleanForCloud(content) {
@@ -260,6 +276,7 @@ async function initializeAuth() {
         setAccount(user);
         showAuth(false);
         await loadCloudChats();
+        updateWelcomeGreeting(user);
         setStatus("ready", "Signed in");
       } else {
         cloudSyncReady = false;
