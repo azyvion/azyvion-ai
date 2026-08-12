@@ -222,6 +222,8 @@ textarea::placeholder{color:#8b98a3}
 .google-btn:disabled{opacity:.65;cursor:default;transform:none}
 .google-btn svg{width:18px;height:18px}
 .google-btn.loading{opacity:.7}
+.guest-btn{width:100%;height:38px;margin-top:10px;border:0;background:transparent;color:#7a8c98;font:600 12px var(--font-ui);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.guest-btn:hover{color:#c7d3da}
 .auth-note{margin-top:14px;color:#596b77;font-size:10px;line-height:1.5}
 body.auth-locked .main{filter:blur(2px);pointer-events:none}
 @media(max-width:860px){.account-popover{left:12px;right:auto;bottom:82px}.auth-card{padding:28px 22px}}
