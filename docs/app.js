@@ -69,7 +69,10 @@ const appEl = document.querySelector(".app"),
   accountEmail = document.getElementById("accountEmail"),
   accountMenu = document.getElementById("accountMenu"),
   accountPopover = document.getElementById("accountPopover"),
-  signOutBtn = document.getElementById("signOutBtn");
+  signOutBtn = document.getElementById("signOutBtn"),
+  settingsBtn = document.getElementById("settingsBtn"),
+  settingsOverlay = document.getElementById("settingsOverlay"),
+  settingsClose = document.getElementById("settingsClose");
 
 const MAX_IMAGES = 5; // Groq's qwen3.6-27b vision model accepts up to 5 images per request
 let pendingImages = []; // [{ dataUrl, name }] queued for the next message
@@ -323,6 +326,7 @@ async function initializeAuth() {
       } else {
         cloudSyncReady = false;
         setAccount(null);
+        showSettings(false); // settings requires an active session — close it if the user signs out
         const skip = isGuestSession();
         showAuth(!skip, redirectErrorNote || "Sign in with Google to sync your Azyvion AI conversations.");
         redirectErrorNote = null;
@@ -402,6 +406,45 @@ signOutBtn?.addEventListener("click", async () => {
 document.addEventListener("click", (event) => {
   if (!accountPopover.hidden && !accountPopover.contains(event.target) && event.target !== accountMenu) accountPopover.hidden = true;
 });
+
+/* ---------- settings modal ---------- */
+function showSettings(show) {
+  if (!settingsOverlay) return;
+  settingsOverlay.hidden = !show;
+}
+
+settingsBtn?.addEventListener("click", () => {
+  // Settings will soon hold account-level configuration, not just local
+  // design preferences — so opening it requires an active Google session.
+  // Guests and signed-out users are sent to the login overlay instead.
+  if (firebaseIsConfigured() && !currentUser) {
+    try {
+      sessionStorage.removeItem("azyvion_guest_mode");
+    } catch {
+      /* storage unavailable */
+    }
+    showAuth(true, "Sign in to access Settings.");
+    return;
+  }
+  showSettings(true);
+});
+settingsClose?.addEventListener("click", () => showSettings(false));
+settingsOverlay?.addEventListener("click", (event) => {
+  if (event.target === settingsOverlay) showSettings(false);
+});
+
+const settingsTabButtons = document.querySelectorAll(".settings-tab");
+const settingsPanes = document.querySelectorAll(".settings-pane");
+settingsTabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    settingsTabButtons.forEach((b) => {
+      b.classList.toggle("active", b === btn);
+      b.setAttribute("aria-selected", b === btn ? "true" : "false");
+    });
+    settingsPanes.forEach((pane) => pane.classList.toggle("active", pane.dataset.pane === btn.dataset.tab));
+  });
+});
+
 initializeAuth();
 
 /* ---------- sidebar rendering ---------- */
