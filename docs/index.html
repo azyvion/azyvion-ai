@@ -70,13 +70,25 @@
 
     <div class="thread" id="thread">
       <section class="welcome" id="welcome">
-        <div class="eyebrow">AZYVION / INTELLIGENCE LAYER</div>
-        <h1>Intelligence<br><em>Beyond Limits.</em></h1>
+        <div class="welcome-greet">
+          <span class="welcome-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2C12 7 15 10 20 12C15 14 12 17 12 22C12 17 9 14 4 12C9 10 12 7 12 2Z" fill="url(#welcomeMarkGrad)"/>
+              <defs>
+                <linearGradient id="welcomeMarkGrad" x1="4" y1="2" x2="20" y2="22" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#176EB1"/>
+                  <stop offset="1" stop-color="#00A9D9"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </span>
+          <h1 id="welcomeGreeting">Welcome to <em>Azyvion AI</em></h1>
+        </div>
         <p>A private AI interface built by Azyvion. Ask questions, explore ideas, write, analyze, and build.</p>
         <div class="suggestions" id="suggestions">
-          <button>Give me a startup idea</button>
-          <button>Help me build a product</button>
-          <button>Explain AI simply</button>
+          <button type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.44 1 1.13 1 1.85V16h5v-.25c0-.72.4-1.4 1-1.85A6 6 0 0 0 12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Give me a startup idea</button>
+          <button type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M14 6.5 4 11l10 4.5 10-4.5L14 6.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.5 12.8V17c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5v-4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Help me build a product</button>
+          <button type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m9 8-5 4 5 4M15 8l5 4-5 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Explain AI simply</button>
         </div>
       </section>
       <div class="messages" id="messages"></div>
