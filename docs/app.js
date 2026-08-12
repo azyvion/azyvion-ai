@@ -62,6 +62,7 @@ const appEl = document.querySelector(".app"),
   googleSignInBtn = document.getElementById("googleSignIn"),
   guestSignInBtn = document.getElementById("guestSignIn"),
   authNote = document.getElementById("authNote"),
+  accountCard = document.getElementById("accountCard"),
   accountAvatar = document.getElementById("accountAvatar"),
   accountName = document.getElementById("accountName"),
   accountEmail = document.getElementById("accountEmail"),
@@ -130,12 +131,17 @@ function showAuth(show, note = "Sign in with Google to sync your Azyvion AI conv
 function setAccount(user) {
   if (!user) {
     accountName.textContent = firebaseIsConfigured() ? "Signed out" : "Local mode";
-    accountEmail.textContent = firebaseIsConfigured() ? "Sign in to sync" : "Firebase not configured";
+    accountEmail.textContent = firebaseIsConfigured() ? "Tap to sign in" : "Firebase not configured";
     accountAvatar.textContent = "A";
     accountAvatar.style.backgroundImage = "";
+    // Signed out but Firebase is configured: the account card itself becomes
+    // the "sign in" entry point, since the chevron popover only ever offered
+    // "Sign out" (useless once already signed out) with no way back in.
+    accountCard?.classList.toggle("clickable", firebaseIsConfigured());
     updateWelcomeGreeting(null);
     return;
   }
+  accountCard?.classList.remove("clickable");
   accountName.textContent = user.displayName || "Azyvion user";
   accountEmail.textContent = user.email || "Google account";
   if (user.photoURL) {
@@ -347,9 +353,27 @@ guestSignInBtn?.addEventListener("click", () => {
   showAuth(false);
   setStatus("ready", "Local mode");
 });
-accountMenu?.addEventListener("click", () => {
-  accountPopover.hidden = !accountPopover.hidden;
+function openAccountAction() {
+  if (currentUser) {
+    accountPopover.hidden = !accountPopover.hidden;
+    return;
+  }
+  // Signed out (including guest mode): reopen the login overlay instead of
+  // the "Sign out" popover, which had nothing useful to offer here — this
+  // was the missing way back in after choosing "Continue without an account".
+  if (!firebaseIsConfigured()) return;
+  try {
+    sessionStorage.removeItem("azyvion_guest_mode");
+  } catch {
+    /* storage unavailable */
+  }
+  showAuth(true);
+}
+accountMenu?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  openAccountAction();
 });
+accountCard?.addEventListener("click", openAccountAction);
 signOutBtn?.addEventListener("click", async () => {
   accountPopover.hidden = true;
   if (auth) await firebaseSignOut(auth).catch(console.warn);
