@@ -10,7 +10,7 @@ window.AZYVION_CONFIG = {
     authDomain: "azyvion-ai-4af5d.firebaseapp.com",
     projectId: "azyvion-ai-4af5d",
     storageBucket: "azyvion-ai-4af5d.firebasestorage.app",
-    messagingSenderId: "TU_MESSAGING_SENDER_ID",
-    appId: "TU_APP_ID"
+    messagingSenderId: "862041272189",
+    appId: "1:862041272189:web:d54debf98c9c9511362614"
   }
 };
