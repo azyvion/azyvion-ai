@@ -1,14 +1,18 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-import {
+// Firebase SDKs are loaded dynamically (see loadFirebaseSdk below) instead
+// of via static imports. A static "import ... from <CDN url>" that fails to
+// load — offline, blocked CDN, ad-blocker, corporate firewall — aborts the
+// entire module before a single line of app.js runs. That used to take the
+// whole app down (no chat, nothing), not just the login screen. Dynamic
+// import() wrapped in try/catch lets Azyvion AI fall back to local mode.
+const FIREBASE_SDK_VERSION = "12.16.0";
+let initializeApp,
   getAuth,
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
-  signOut as firebaseSignOut,
-} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import {
+  firebaseSignOut,
   getFirestore,
   collection,
   doc,
@@ -16,8 +20,19 @@ import {
   setDoc,
   deleteDoc,
   serverTimestamp,
-  query,
-} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+  query;
+
+async function loadFirebaseSdk() {
+  const [appMod, authMod, fsMod] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/firebase-auth.js`),
+    import(`https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/firebase-firestore.js`),
+  ]);
+  ({ initializeApp } = appMod);
+  ({ getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult } = authMod);
+  firebaseSignOut = authMod.signOut;
+  ({ getFirestore, collection, doc, getDocs, setDoc, deleteDoc, serverTimestamp, query } = fsMod);
+}
 
 const API_BASE = (window.AZYVION_CONFIG && window.AZYVION_CONFIG.API_BASE_URL) || "";
 const STORAGE_KEY = "azyvion_ai_chats_v1";
@@ -45,6 +60,7 @@ const appEl = document.querySelector(".app"),
   welcomeGreeting = document.getElementById("welcomeGreeting"),
   authOverlay = document.getElementById("authOverlay"),
   googleSignInBtn = document.getElementById("googleSignIn"),
+  guestSignInBtn = document.getElementById("guestSignIn"),
   authNote = document.getElementById("authNote"),
   accountAvatar = document.getElementById("accountAvatar"),
   accountName = document.getElementById("accountName"),
@@ -250,10 +266,22 @@ async function signInGoogle() {
 
 function friendlyAuthError(err) {
   const code = err?.code || "";
-  if (code.includes("popup-closed-by-user")) return "Google sign-in was closed. Try again when you're ready.";
-  if (code.includes("unauthorized-domain")) return "This domain is not authorized in Firebase. Add your GitHub Pages domain under Authentication → Settings → Authorized domains.";
+  if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) return "Google sign-in was closed. Try again when you're ready.";
+  if (code.includes("popup-blocked")) return "Your browser blocked the sign-in popup. Allow popups for this site and try again.";
+  if (code.includes("unauthorized-domain")) return "This domain is not authorized in Firebase. Add it under Authentication → Settings → Authorized domains.";
   if (code.includes("operation-not-allowed")) return "Google sign-in is not enabled in your Firebase project yet.";
-  return "Google sign-in failed. Check the Firebase setup and try again.";
+  if (code.includes("network-request-failed")) return "No internet connection. Check your network and try again.";
+  if (code.includes("too-many-requests")) return "Too many attempts. Wait a moment and try again.";
+  if (code.includes("user-disabled")) return "This Google account has been disabled.";
+  return "Google sign-in failed. Check your connection and try again.";
+}
+
+function isGuestSession() {
+  try {
+    return sessionStorage.getItem("azyvion_guest_mode") === "1";
+  } catch {
+    return false;
+  }
 }
 
 async function initializeAuth() {
@@ -263,11 +291,18 @@ async function initializeAuth() {
     setAccount(null);
     return;
   }
+  let redirectErrorNote = null;
   try {
+    await loadFirebaseSdk();
     firebaseApp = initializeApp(FIREBASE_CONFIG);
     auth = getAuth(firebaseApp);
     db = getFirestore(firebaseApp);
-    await getRedirectResult(auth).catch((err) => console.warn("Redirect sign-in", err));
+    try {
+      await getRedirectResult(auth);
+    } catch (err) {
+      console.warn("Redirect sign-in", err);
+      redirectErrorNote = friendlyAuthError(err);
+    }
     onAuthStateChanged(auth, async (user) => {
       currentUser = user;
       authReady = true;
@@ -281,26 +316,57 @@ async function initializeAuth() {
       } else {
         cloudSyncReady = false;
         setAccount(null);
-        showAuth(true);
-        setStatus("ready", "Sign in required");
+        const skip = isGuestSession();
+        showAuth(!skip, redirectErrorNote || "Sign in with Google to sync your Azyvion AI conversations.");
+        redirectErrorNote = null;
+        setStatus("ready", skip ? "Local mode" : "Sign in required");
       }
     });
   } catch (err) {
+    // Firebase failed to load or initialize (offline, blocked CDN,
+    // ad-blocker, bad config, etc). Azyvion AI still works fully in local
+    // mode — chats already persist to localStorage — so a login-system
+    // outage never locks the person out of the whole app anymore.
     console.error("Firebase initialization failed", err);
     authRequired = false;
     authReady = true;
+    auth = null;
     setAccount(null);
-    authNote.textContent = "Firebase could not initialize. Local mode is still available.";
+    showAuth(false);
+    setStatus("ready", "Local mode");
   }
 }
 
 googleSignInBtn?.addEventListener("click", signInGoogle);
+guestSignInBtn?.addEventListener("click", () => {
+  try {
+    sessionStorage.setItem("azyvion_guest_mode", "1");
+  } catch {
+    /* sessionStorage unavailable — overlay may reappear on reload, not critical */
+  }
+  showAuth(false);
+  setStatus("ready", "Local mode");
+});
 accountMenu?.addEventListener("click", () => {
   accountPopover.hidden = !accountPopover.hidden;
 });
 signOutBtn?.addEventListener("click", async () => {
   accountPopover.hidden = true;
   if (auth) await firebaseSignOut(auth).catch(console.warn);
+  // Privacy: wipe this device's local chat cache on sign-out so the next
+  // person who signs in on a shared device doesn't inherit (or accidentally
+  // sync into their own account) the previous user's conversations. Anything
+  // unsynced was already pushed to the cloud by the debounce in
+  // queueCloudSync before this point.
+  chats = [];
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  activeId = createChat();
+  renderHistory();
+  renderMessages();
 });
 document.addEventListener("click", (event) => {
   if (!accountPopover.hidden && !accountPopover.contains(event.target) && event.target !== accountMenu) accountPopover.hidden = true;
