@@ -1,14 +1,16 @@
-// Where the Azyvion AI backend (server.js) is deployed.
-//
-// - Running locally with `npm start`, or hosting server.js somewhere that
-//   also serves this /docs folder: leave this as "" (same origin).
-// - Hosting this frontend on GitHub Pages with the backend deployed
-//   separately (Render, Railway, Fly.io, etc.): set this to that backend's
-//   full URL, e.g. "https://azyvion-ai.onrender.com" (no trailing slash).
-// APP_VERSION debe coincidir con VERSION en sw.js y con version.json.
-// Súbela en CADA actualización: eso es lo que hace que la PWA instalada
-// se entere de que hay una versión nueva y se recargue sola.
+// Public frontend configuration. Firebase web config is safe to ship in the
+// browser; access is protected by Firebase Auth + Firestore Security Rules.
+
 window.AZYVION_CONFIG = {
   API_BASE_URL: "https://azyvion-ai.onrender.com",
-  APP_VERSION: "3.0",
+  APP_VERSION: "3.1",
+
+  FIREBASE: {
+    apiKey: "AIzaSyBN3Tr--GzrzO0CGBHe5Fga_RQvRFftlK0",
+    authDomain: "azyvion-ai-4af5d.firebaseapp.com",
+    projectId: "azyvion-ai-4af5d",
+    storageBucket: "azyvion-ai-4af5d.firebasestorage.app",
+    messagingSenderId: "TU_MESSAGING_SENDER_ID",
+    appId: "TU_APP_ID"
+  }
 };
