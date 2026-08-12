@@ -64,7 +64,8 @@ let cloudSyncReady = false;
 let authReady = false;
 let authRequired = FIREBASE_ENABLED;
 let chats = loadChats();
-let activeId = chats.length ? chats[0].id : createChat();
+let activeId;
+activeId = chats.length ? chats[0].id : createChat();
 
 /* ---------- persistence ---------- */
 function loadChats() {
@@ -703,6 +704,12 @@ function titleFrom(text) {
    sending) recovers automatically instead of staying stuck on the canned
    demo reply. */
 let statusRetryTimer = null;
+
+function setStatus(status, text) {
+  statusText.textContent = text;
+  statusWrap.classList.remove("ready", "error");
+  if (status === "ready" || status === "error") statusWrap.classList.add(status);
+}
 
 async function checkStatus(isRetry = false) {
   if (!API_BASE && window.location.protocol !== "http:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
