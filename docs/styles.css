@@ -167,3 +167,33 @@ textarea::placeholder{color:#596875}
   .messages{padding:0 16px}
   .composer-dock{padding:0 16px 16px}
 }
+
+
+/* ---------- Azyvion AI 3.1 — account/auth ---------- */
+.side-top{padding-bottom:12px}
+.account-card{display:flex;align-items:center;gap:9px;margin-top:13px;padding:8px 8px 8px 6px;border:1px solid rgba(239,241,243,.08);border-radius:12px;background:rgba(255,255,255,.025)}
+.account-avatar{width:30px;height:30px;flex:0 0 30px;border-radius:9px;border:1px solid rgba(0,169,217,.3);background-size:cover;background-position:center;display:grid;place-items:center;color:#bfeeff;background-color:rgba(0,169,217,.08);font:800 11px "Manrope";overflow:hidden}
+.account-copy{min-width:0;display:flex;flex-direction:column;gap:2px;flex:1}
+.account-copy strong{font:600 11px "Manrope";color:#eef5f8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-copy span{font-size:9px;color:#687784;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-menu{all:unset;width:26px;height:26px;border-radius:7px;color:#71808d;display:grid;place-items:center;cursor:pointer;letter-spacing:.1em}
+.account-menu:hover{background:rgba(255,255,255,.06);color:#fff}
+.account-popover{position:fixed;left:220px;top:88px;z-index:80;padding:5px;border:1px solid var(--line);background:rgba(4,19,35,.98);border-radius:10px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+.account-popover button{border:0;background:transparent;color:#c9d5dd;font:500 12px "DM Sans";padding:8px 12px;border-radius:7px;cursor:pointer}
+.account-popover button:hover{background:rgba(255,255,255,.06);color:#fff}
+.auth-overlay{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:20px;background:rgba(0,4,10,.82);backdrop-filter:blur(18px)}
+.auth-overlay[hidden],.account-popover[hidden]{display:none}
+.auth-card{width:min(420px,100%);padding:34px;border:1px solid rgba(239,241,243,.12);border-radius:22px;background:linear-gradient(180deg,rgba(8,26,43,.96),rgba(2,11,20,.98));box-shadow:0 30px 100px rgba(0,0,0,.55);text-align:center}
+.auth-mark{width:54px;height:54px;margin:0 auto 18px;border:1px solid rgba(0,169,217,.32);border-radius:16px;display:grid;place-items:center;background:rgba(0,169,217,.07);overflow:hidden}
+.auth-mark img{width:38px;height:38px;object-fit:contain}
+.auth-eyebrow{font-size:9px;letter-spacing:.22em;color:#5e7482;font-weight:700}
+.auth-card h2{margin:10px 0 9px;font:800 30px/1 "Manrope";letter-spacing:-.045em;color:#fff}
+.auth-card p{margin:0 auto 22px;max-width:330px;color:#91a0ad;font-size:13px;line-height:1.6}
+.google-btn{width:100%;height:46px;border:1px solid rgba(255,255,255,.14);border-radius:11px;background:#fff;color:#1b2630;display:flex;align-items:center;justify-content:center;gap:10px;font:600 13px "DM Sans";cursor:pointer;transition:transform .15s ease,box-shadow .15s ease,opacity .15s ease}
+.google-btn:hover{transform:translateY(-1px);box-shadow:0 10px 26px rgba(0,0,0,.25)}
+.google-btn:disabled{opacity:.65;cursor:default;transform:none}
+.google-btn svg{width:18px;height:18px}
+.google-btn.loading{opacity:.7}
+.auth-note{margin-top:14px;color:#596b77;font-size:10px;line-height:1.5}
+body.auth-locked .main{filter:blur(2px);pointer-events:none}
+@media(max-width:860px){.account-popover{left:auto;right:12px;top:72px}.auth-card{padding:28px 22px}}
