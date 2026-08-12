@@ -35,23 +35,26 @@
   <aside class="sidebar" id="sidebar">
     <div class="side-top">
       <a class="brand" href="./"><img src="./logo.png" alt="Azyvion" onerror="this.style.display='none'"><span>AZYVION <b>AI</b></span></a>
+    </div>
+    <button class="new-chat" id="newChat">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1.5V13.5M1.5 7.5H13.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      New chat
+    </button>
+    <div class="nav-label">Recientes</div>
+    <nav class="history" id="history" aria-label="Chat history"></nav>
+    <div class="side-bottom">
+      <div class="status" id="statusWrap" role="status" aria-live="polite"><i id="statusDot"></i><span id="statusText">Checking system</span></div>
+      <div class="app-version" id="appVersion">v3.1</div>
       <div class="account-card" id="accountCard">
         <div class="account-avatar" id="accountAvatar">A</div>
         <div class="account-copy">
           <strong id="accountName">Guest</strong>
           <span id="accountEmail">Local mode</span>
         </div>
-        <button type="button" class="account-menu" id="accountMenu" aria-label="Account menu" aria-haspopup="menu">⋯</button>
+        <button type="button" class="account-menu" id="accountMenu" aria-label="Account menu" aria-haspopup="menu">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 8.5 7 12l3.5-3.5M3.5 5.5 7 2l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
-    </div>
-    <button class="new-chat" id="newChat">
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1.5V13.5M1.5 7.5H13.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      New chat
-    </button>
-    <nav class="history" id="history" aria-label="Chat history"></nav>
-    <div class="side-bottom">
-      <div class="status" id="statusWrap" role="status" aria-live="polite"><i id="statusDot"></i><span id="statusText">Checking system</span></div>
-      <div class="app-version" id="appVersion">v3.1</div>
     </div>
   </aside>
 
