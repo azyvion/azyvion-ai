@@ -40,11 +40,22 @@
       <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1.5V13.5M1.5 7.5H13.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       New chat
     </button>
+
+    <div class="nav-label-row">
+      <div class="nav-label">Proyectos</div>
+      <button type="button" class="nav-add" id="newProjectBtn" aria-label="New project">+</button>
+    </div>
+    <div class="projects" id="projectsList" aria-label="Projects"></div>
+
     <div class="nav-label">Recientes</div>
     <nav class="history" id="history" aria-label="Chat history"></nav>
     <div class="side-bottom">
       <div class="status" id="statusWrap" role="status" aria-live="polite"><i id="statusDot"></i><span id="statusText">Checking system</span></div>
       <div class="app-version" id="appVersion">v3.1</div>
+      <button type="button" class="settings-link" id="settingsBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.5a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H4.5a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10a1.7 1.7 0 0 0 1-1.55V4.5a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V10a1.7 1.7 0 0 0 1.55 1h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        Settings
+      </button>
       <div class="account-card" id="accountCard">
         <div class="account-avatar" id="accountAvatar">A</div>
         <div class="account-copy">
@@ -110,6 +121,22 @@
       <div class="hint">Enter to send · Shift + Enter for a new line · Puedes adjuntar imágenes (JPG, PNG, WEBP)</div>
     </div>
   </main>
+
+  <aside class="artifact-panel" id="artifactPanel" hidden>
+    <div class="artifact-head">
+      <span id="artifactTitle">Artifact</span>
+      <div class="artifact-actions">
+        <button type="button" id="artifactPreviewToggle" hidden>Preview</button>
+        <button type="button" id="artifactCopyBtn">Copy</button>
+        <button type="button" id="artifactDownloadBtn">Download</button>
+        <button type="button" id="artifactCloseBtn" aria-label="Close artifact">✕</button>
+      </div>
+    </div>
+    <div class="artifact-body">
+      <pre class="artifact-code" id="artifactCode"><code></code></pre>
+      <iframe class="artifact-frame" id="artifactFrame" title="Artifact preview" sandbox="allow-scripts" hidden></iframe>
+    </div>
+  </aside>
 </div>
 
 <div class="auth-overlay" id="authOverlay" hidden>
@@ -128,6 +155,107 @@
 
 <div class="account-popover" id="accountPopover" hidden>
   <button type="button" id="signOutBtn">Sign out</button>
+</div>
+
+<div class="modal-overlay" id="settingsOverlay" hidden>
+  <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-head">
+      <h2 id="settingsTitle">Settings</h2>
+      <button type="button" class="modal-close" id="settingsClose" aria-label="Close settings">✕</button>
+    </div>
+    <div class="settings-tabs" role="tablist">
+      <button type="button" class="settings-tab active" data-tab="design" role="tab" aria-selected="true">Diseño</button>
+      <button type="button" class="settings-tab" data-tab="advanced" role="tab" aria-selected="false">Avanzado</button>
+    </div>
+    <div class="settings-body">
+      <section class="settings-pane active" data-pane="design">
+        <div class="field-row">
+          <label for="designBlue">Color primario</label>
+          <input type="color" id="designBlue">
+        </div>
+        <div class="field-row">
+          <label for="designCyan">Color de acento</label>
+          <input type="color" id="designCyan">
+        </div>
+        <div class="field-row">
+          <label for="designBg">Color de fondo</label>
+          <input type="color" id="designBg">
+        </div>
+        <div class="field-row">
+          <label for="designFont">Tipografía</label>
+          <select id="designFont">
+            <option value="DM Sans">DM Sans</option>
+            <option value="Inter">Inter</option>
+            <option value="Poppins">Poppins</option>
+            <option value="Manrope">Manrope</option>
+            <option value="Georgia">Georgia (serif)</option>
+            <option value="system-ui">Sistema</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label for="designRadius">Bordes</label>
+          <select id="designRadius">
+            <option value="sharp">Rectos</option>
+            <option value="default">Predeterminado</option>
+            <option value="round">Redondeados</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label for="designDensity">Densidad</label>
+          <select id="designDensity">
+            <option value="comfortable">Cómoda</option>
+            <option value="compact">Compacta</option>
+          </select>
+        </div>
+        <button type="button" class="secondary-btn" id="designReset">Restablecer diseño</button>
+      </section>
+      <section class="settings-pane" data-pane="advanced">
+        <label class="field-label" for="customInstructions">Instrucciones personalizadas</label>
+        <textarea id="customInstructions" rows="4" placeholder="Contexto o instrucciones que se aplican a todas tus conversaciones..."></textarea>
+        <div class="field-row switch-row">
+          <label for="enterToSend">Enter para enviar</label>
+          <input type="checkbox" id="enterToSend">
+        </div>
+        <div class="settings-divider"></div>
+        <div class="field-row switch-row">
+          <span>Exportar tus chats, proyectos y ajustes</span>
+          <button type="button" class="secondary-btn" id="exportDataBtn">Exportar</button>
+        </div>
+        <div class="field-row switch-row">
+          <span>Importar una copia de seguridad</span>
+          <button type="button" class="secondary-btn" id="importDataBtn">Importar</button>
+        </div>
+        <input type="file" id="importFileInput" accept="application/json" hidden>
+        <div class="field-row switch-row">
+          <span>Borrar todos los datos locales</span>
+          <button type="button" class="danger-btn" id="clearDataBtn">Borrar</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="projectOverlay" hidden>
+  <div class="modal project-modal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+    <div class="modal-head">
+      <h2 id="projectModalTitle">New project</h2>
+      <button type="button" class="modal-close" id="projectModalClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label" for="projectName">Nombre</label>
+      <input type="text" id="projectName" placeholder="p. ej. Sitio de marketing">
+      <label class="field-label" for="projectInstructions">Instrucciones / contexto</label>
+      <textarea id="projectInstructions" rows="5" placeholder="Instrucciones o contexto propio de este proyecto..."></textarea>
+      <label class="field-label">Archivos adjuntos</label>
+      <input type="file" id="projectFileInput" multiple hidden accept=".txt,.md,.csv,.json,.js,.ts,.jsx,.tsx,.py,.html,.css,.yml,.yaml">
+      <button type="button" id="projectFileBtn" class="secondary-btn">Agregar archivos</button>
+      <div id="projectFilesList" class="project-files-list"></div>
+      <div class="modal-actions">
+        <button type="button" id="projectDeleteBtn" class="danger-btn" hidden>Eliminar proyecto</button>
+        <button type="button" id="projectSaveBtn" class="primary-btn">Guardar proyecto</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="./config.js"></script>
