@@ -211,7 +211,8 @@ textarea::placeholder{color:#8b98a3}
 .account-popover button:hover{background:rgba(255,255,255,.06);color:#fff}
 .auth-overlay{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:20px;background:rgba(0,4,10,.82);backdrop-filter:blur(18px)}
 .auth-overlay[hidden],.account-popover[hidden]{display:none}
-.auth-card{width:min(420px,100%);padding:34px;border:1px solid rgba(239,241,243,.12);border-radius:22px;background:linear-gradient(180deg,rgba(8,26,43,.96),rgba(2,11,20,.98));box-shadow:0 30px 100px rgba(0,0,0,.55);text-align:center}
+.auth-card{position:relative;width:min(420px,100%);padding:34px;border:1px solid rgba(239,241,243,.12);border-radius:22px;background:linear-gradient(180deg,rgba(8,26,43,.96),rgba(2,11,20,.98));box-shadow:0 30px 100px rgba(0,0,0,.55);text-align:center}
+.auth-close{position:absolute;top:14px;right:14px}
 .auth-mark{width:54px;height:54px;margin:0 auto 18px;border:1px solid rgba(0,169,217,.32);border-radius:16px;display:grid;place-items:center;background:rgba(0,169,217,.07);overflow:hidden}
 .auth-mark img{width:38px;height:38px;object-fit:contain}
 .auth-eyebrow{font-size:9px;letter-spacing:.22em;color:#5e7482;font-weight:700}
