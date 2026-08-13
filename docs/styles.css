@@ -24,9 +24,23 @@ body[data-density="compact"] .new-chat{margin:10px 12px 4px;padding:8px 12px}
 body[data-density="compact"] .side-top{padding:12px 16px 2px}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui),sans-serif;overflow:hidden}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui),sans-serif;overflow:hidden;overscroll-behavior:none}
 
-.app{display:flex;height:100vh;position:relative}
+/* ---------- scrollbars ----------
+   Without this, browsers fall back to their native scrollbar — on Windows
+   (especially inside an installed PWA window) that's a chunky grey classic
+   scrollbar with up/down arrow buttons that clashes hard with the rest of
+   the UI. This themes it everywhere scrolling happens: thin, rounded,
+   barely-there until hovered. Firefox uses scrollbar-width/-color; Chromium
+   / Safari / Edge use the ::-webkit-scrollbar-* pseudo-elements — both are
+   included so every engine gets the same treatment. */
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+*::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28);background-clip:padding-box}
+
+.app{display:flex;height:100vh;height:100dvh;position:relative;max-width:100vw;overflow:hidden}
 
 /* ---------- sidebar ---------- */
 .sidebar{width:var(--sidebar-w);flex:0 0 var(--sidebar-w);background:rgba(2,10,19,.9);border-right:1px solid var(--line);display:flex;flex-direction:column;z-index:20;transition:transform .25s ease}
@@ -101,7 +115,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui),
 .avatar{flex:0 0 32px;height:32px;border:1px solid rgba(0,169,217,.35);border-radius:9px;display:grid;place-items:center;font:800 11px "Manrope";color:#8fe0ff;background:rgba(0,169,217,.06)}
 .bubble{max-width:680px;min-width:0}
 .label{display:block;color:#657583;font-size:9px;font-weight:700;letter-spacing:.15em;margin-bottom:7px}
-.content{color:#dbe1e6;font-size:14px;line-height:1.7}
+.content{color:#dbe1e6;font-size:14px;line-height:1.7;overflow-wrap:anywhere}
 .content p{margin:0 0 12px;white-space:pre-wrap;word-wrap:break-word}
 .content p:last-child{margin-bottom:0}
 .content h4,.content h5,.content h6{margin:18px 0 8px;color:#fff;font:700 15px "Manrope";letter-spacing:-.01em}
@@ -219,14 +233,46 @@ textarea::placeholder{color:#8b98a3}
 /* ---------- responsive / mobile sidebar ---------- */
 @media(max-width:860px){
   .menu-toggle{display:flex}
-  .sidebar{position:fixed;top:0;left:0;bottom:0;transform:translateX(-100%)}
+  .sidebar{position:fixed;top:0;left:0;bottom:0;width:min(var(--sidebar-w),86vw);flex-basis:min(var(--sidebar-w),86vw);transform:translateX(-100%)}
   .app.sidebar-open .sidebar{transform:translateX(0)}
   .app.sidebar-open .scrim{display:block}
   .thread{padding-top:76px}
-  .welcome h1{font-size:40px}
+  .welcome{margin:16px auto 28px;padding:32px 22px 30px}
+  .welcome h1{font-size:32px}
   .messages{padding:0 16px}
   .composer-dock{padding:0 16px 16px}
 }
+
+/* Small phones (iPhone SE and similar ~360-390px wide, plus any narrow
+   resized desktop/PWA window): tighten everything further so nothing
+   crowds or clips, and give every fixed UI element room for the notch /
+   home-indicator via safe-area insets. */
+@media(max-width:480px){
+  .menu-toggle{top:calc(12px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left))}
+  .status-corner{top:calc(10px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right))}
+  .thread{padding-top:68px}
+  .welcome{margin:12px auto 20px;padding:26px 16px 24px;border-radius:20px}
+  .welcome h1{font-size:26px}
+  .welcome>p{font-size:13px}
+  .suggestions button{padding:8px 12px;font-size:11.5px}
+  .messages{padding:0 12px}
+  .message{gap:9px;margin-bottom:18px}
+  .avatar{flex-basis:26px;width:26px;height:26px;border-radius:8px}
+  .bubble{max-width:calc(100vw - 70px)}
+  .composer-dock{padding:0 10px calc(10px + env(safe-area-inset-bottom))}
+  .composer{padding:8px;gap:6px}
+  .attach-btn,.composer button[type="submit"]{width:36px;height:36px}
+  textarea{padding:8px;font-size:15px} /* 15px+ keeps iOS Safari from auto-zooming on focus */
+  .model-picker-btn{padding:5px 10px 5px 7px;font-size:12px}
+  .model-popover{width:min(280px,calc(100vw - 24px))}
+  .gen-image-wrap{max-width:100%}
+}
+
+/* Guards against genuinely tiny/oddly-resized windows (e.g. a desktop PWA
+   dragged down to ~150px wide) where fixed-width children could otherwise
+   force horizontal overflow and drag in a scrollbar for the whole app. */
+.sidebar,.main{min-width:0}
+img,svg{max-width:100%}
 
 
 /* ---------- Azyvion AI 3.1 — account/auth ---------- */
