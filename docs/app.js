@@ -88,6 +88,7 @@ const appEl = document.querySelector(".app"),
   projectSaveBtn = document.getElementById("projectSaveBtn"),
   modelPickerBtn = document.getElementById("modelPickerBtn"),
   modelPickerLabel = document.getElementById("modelPickerLabel"),
+  modelPickerIcon = document.getElementById("modelPickerIcon"),
   modelPopover = document.getElementById("modelPopover"),
   composerHint = document.getElementById("composerHint");
 
@@ -144,9 +145,16 @@ function getCurrentModel() {
   return MODELS.find((m) => m.id === currentModelId) || MODELS[0];
 }
 
+const IMAGE_MODEL_ICON =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.6" fill="currentColor"/><path d="M21 15.5 16 10l-8.5 8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function applyModelToComposer() {
   const model = getCurrentModel();
   if (modelPickerLabel) modelPickerLabel.textContent = model.name;
+  if (modelPickerIcon) {
+    modelPickerIcon.innerHTML = model.type === "image" ? IMAGE_MODEL_ICON : "S";
+    modelPickerIcon.style.background = model.type === "image" ? "linear-gradient(135deg,#7c4dff,#ff6fa5)" : "";
+  }
   if (input) input.placeholder = model.placeholder;
   if (composerHint) composerHint.textContent = model.hint;
   if (attachBtn) attachBtn.hidden = model.type === "image"; // attaching a photo doesn't apply to image generation
@@ -1233,9 +1241,19 @@ function generatedImageHtml(url, prompt) {
     `<div class="gen-image-actions">` +
     `<a href="${safeUrl}" download="straks-imagen.jpg" target="_blank" rel="noopener">Descargar</a>` +
     `<a href="${safeUrl}" target="_blank" rel="noopener">Abrir</a>` +
+    `<button type="button" class="gen-regenerate" data-prompt="${safePrompt}">Regenerar</button>` +
     `</div></div>`
   );
 }
+
+// Event delegation: the "Regenerar" button is created dynamically (both for
+// history and for fresh replies), so it's wired once here instead of at
+// creation time.
+messagesEl.addEventListener("click", (event) => {
+  const btn = event.target.closest(".gen-regenerate");
+  if (!btn) return;
+  regenerateImage(btn.dataset.prompt || "");
+});
 
 // Message content can be a plain string or an array of parts:
 // OpenAI-style { type: "text" } / { type: "image_url" } (user text +
@@ -1570,7 +1588,13 @@ async function sendMessage(text) {
    a different result. */
 function pollinationsUrl(prompt, seed) {
   const encoded = encodeURIComponent(prompt.slice(0, 800));
-  return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${seed}`;
+  // model=flux: Pollinations' strongest general-purpose free model (no key
+  // needed). enhance=true lets it expand/improve the raw prompt internally
+  // before generating — this is the single biggest lever for output quality
+  // without a paid key, closing a lot of the gap with ChatGPT/Gemini-style
+  // image tools. nologo removes the watermark; safe stays off by default so
+  // normal creative prompts aren't over-blocked.
+  return `https://image.pollinations.ai/prompt/${encoded}?model=flux&width=1024&height=1024&nologo=true&enhance=true&seed=${seed}`;
 }
 
 async function sendImagePrompt(text) {
@@ -1588,10 +1612,24 @@ async function sendImagePrompt(text) {
 
   input.value = "";
   input.style.height = "auto";
+  await runImageGeneration(text, chat);
+}
+
+// Re-runs generation for a prompt already in the conversation (the
+// "Regenerar" button on a past result) — same flow as sendImagePrompt but
+// without adding another user bubble, since the prompt is already visible.
+async function regenerateImage(text) {
+  if (!text || send.disabled) return;
+  const chat = getActiveChat();
+  await runImageGeneration(text, chat);
+}
+
+// Shared by sendImagePrompt and regenerateImage: appends a loading bubble
+// (blurred placeholder that resolves once the image finishes loading) and
+// pushes the final assistant message once it's ready.
+async function runImageGeneration(text, chat) {
   send.disabled = true;
 
-  // Loading bubble: a blurred placeholder that resolves into the real
-  // image once it finishes loading, instead of a blank wait.
   const seed = Math.floor(Math.random() * 1e9);
   const url = pollinationsUrl(text, seed);
   const w = document.createElement("div");
@@ -1611,10 +1649,12 @@ async function sendImagePrompt(text) {
     wrap.classList.remove("loading");
     if (ok) {
       const safeUrl = escapeHtml(url);
+      const safePrompt = escapeHtml(text);
       status.outerHTML =
         `<div class="gen-image-actions">` +
         `<a href="${safeUrl}" download="straks-imagen.jpg" target="_blank" rel="noopener">Descargar</a>` +
         `<a href="${safeUrl}" target="_blank" rel="noopener">Abrir</a>` +
+        `<button type="button" class="gen-regenerate" data-prompt="${safePrompt}">Regenerar</button>` +
         `</div>`;
       chat.messages.push({
         role: "assistant",
