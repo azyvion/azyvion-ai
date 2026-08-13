@@ -3,7 +3,7 @@
 
 window.AZYVION_CONFIG = {
   API_BASE_URL: "https://azyvion-ai.onrender.com",
-  APP_VERSION: "3.1",
+  APP_VERSION: "3.2",
 
   FIREBASE: {
     apiKey: "AIzaSyBN3Tr--GzrzO0CGBHe5Fga_RQvRFftlK0",
