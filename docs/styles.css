@@ -48,10 +48,11 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui),
 .h-item:hover .del,.h-item:focus-visible .del{opacity:1}
 .h-item .del:hover{color:#fff;background:rgba(255,255,255,.08)}
 .side-bottom{padding:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
-.status{display:flex;align-items:center;gap:8px;color:#657482;font-size:11px;padding:4px 6px}
-.status i{width:7px;height:7px;border-radius:50%;background:#657482;flex:0 0 auto}
-.status.ready i{background:#5fe0b2;box-shadow:0 0 14px rgba(95,224,178,.7)}
+.status{display:flex;align-items:center;gap:6px;color:#657482;font-size:10px}
+.status i{width:6px;height:6px;border-radius:50%;background:#657482;flex:0 0 auto}
+.status.ready i{background:#5fe0b2;box-shadow:0 0 10px rgba(95,224,178,.7)}
 .status.error i{background:#ff7070}
+.status-corner{position:fixed;top:10px;right:12px;z-index:40;padding:5px 9px 5px 8px;border-radius:20px;background:rgba(2,8,15,.6);border:1px solid var(--line);backdrop-filter:blur(10px);pointer-events:none}
 .app-version{color:#455260;font-size:10px;letter-spacing:.06em;padding:0 6px 6px}
 
 .menu-toggle{display:none;position:fixed;top:16px;left:16px;z-index:30;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:rgba(2,8,15,.75);backdrop-filter:blur(10px);color:var(--text);cursor:pointer;align-items:center;justify-content:center}
