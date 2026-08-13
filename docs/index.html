@@ -111,6 +111,22 @@
 
     <div class="composer-dock">
       <div class="attach-preview" id="attachPreview"></div>
+      <div class="model-bar">
+        <button type="button" class="model-picker-btn" id="modelPickerBtn" aria-haspopup="true" aria-expanded="false">
+          <span id="modelPickerLabel">Straks</span>
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="model-popover" id="modelPopover" hidden>
+          <button type="button" class="model-option" data-model="straks">
+            <span class="model-option-main"><span class="model-option-name">Straks</span><span class="model-option-desc">Modelo principal · rápido para el día a día</span></span>
+            <svg class="model-check" width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5l3 3 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="model-option" data-model="straks-image">
+            <span class="model-option-main"><span class="model-option-name">Straks Imagen</span><span class="model-option-desc">Genera imágenes a partir de texto</span></span>
+            <svg class="model-check" width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5l3 3 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
       <form class="composer" id="composer">
         <input type="file" id="fileInput" accept="image/*" multiple hidden>
         <button type="button" class="attach-btn" id="attachBtn" aria-label="Attach image">
@@ -119,7 +135,7 @@
         <textarea id="input" rows="1" placeholder="Message Azyvion AI..." autocomplete="off"></textarea>
         <button type="submit" id="send" aria-label="Send"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3 8M8 3L13 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </form>
-      <div class="hint">Enter to send · Shift + Enter for a new line · Puedes adjuntar imágenes (JPG, PNG, WEBP)</div>
+      <div class="hint" id="composerHint">Enter to send · Shift + Enter for a new line · Puedes adjuntar imágenes (JPG, PNG, WEBP)</div>
     </div>
   </main>
 
