@@ -85,7 +85,11 @@ const appEl = document.querySelector(".app"),
   projectFileBtn = document.getElementById("projectFileBtn"),
   projectFilesListEl = document.getElementById("projectFilesList"),
   projectDeleteBtn = document.getElementById("projectDeleteBtn"),
-  projectSaveBtn = document.getElementById("projectSaveBtn");
+  projectSaveBtn = document.getElementById("projectSaveBtn"),
+  modelPickerBtn = document.getElementById("modelPickerBtn"),
+  modelPickerLabel = document.getElementById("modelPickerLabel"),
+  modelPopover = document.getElementById("modelPopover"),
+  composerHint = document.getElementById("composerHint");
 
 const MAX_IMAGES = 5; // Groq's qwen3.6-27b vision model accepts up to 5 images per request
 let pendingImages = []; // [{ dataUrl, name }] queued for the next message
@@ -111,6 +115,79 @@ let projects = loadProjects();
 const expandedProjectIds = new Set(); // which project rows are expanded (UI-only, not persisted)
 let editingProjectId = null; // project currently open in the project modal, null = creating new
 let editingFiles = []; // working copy of the project's attached files while the modal is open
+
+/* ---------- models ----------
+   Straks (chat, text) and Straks Imagen (text-to-image) are the two models
+   the user can pick from the model picker above the composer, styled after
+   Claude's model switcher. The choice is per-device (localStorage), not
+   per-chat, and simply changes what sendMessage() does with the next
+   message: talk to /api/chat, or generate an image client-side. */
+const MODELS = [
+  { id: "straks", name: "Straks", desc: "Modelo principal · rápido para el día a día", type: "chat", placeholder: "Message Azyvion AI...", hint: "Enter to send · Shift + Enter for a new line · Puedes adjuntar imágenes (JPG, PNG, WEBP)" },
+  { id: "straks-image", name: "Straks Imagen", desc: "Genera imágenes a partir de texto", type: "image", placeholder: "Describe la imagen que quieres generar…", hint: "Enter para generar · Describe la imagen con el mayor detalle posible" },
+];
+const MODEL_STORAGE_KEY = "azyvion_ai_model_v1";
+
+function loadModel() {
+  try {
+    const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (MODELS.some((m) => m.id === saved)) return saved;
+  } catch {
+    /* storage unavailable */
+  }
+  return MODELS[0].id;
+}
+
+let currentModelId = loadModel();
+
+function getCurrentModel() {
+  return MODELS.find((m) => m.id === currentModelId) || MODELS[0];
+}
+
+function applyModelToComposer() {
+  const model = getCurrentModel();
+  if (modelPickerLabel) modelPickerLabel.textContent = model.name;
+  if (input) input.placeholder = model.placeholder;
+  if (composerHint) composerHint.textContent = model.hint;
+  if (attachBtn) attachBtn.hidden = model.type === "image"; // attaching a photo doesn't apply to image generation
+  modelPopover?.querySelectorAll(".model-option").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.model === model.id);
+  });
+}
+
+function setModel(id) {
+  if (!MODELS.some((m) => m.id === id)) return;
+  currentModelId = id;
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, id);
+  } catch {
+    /* storage unavailable — selection still works for this session */
+  }
+  applyModelToComposer();
+  closeModelPopover();
+}
+
+function closeModelPopover() {
+  if (!modelPopover) return;
+  modelPopover.hidden = true;
+  modelPickerBtn?.setAttribute("aria-expanded", "false");
+}
+
+modelPickerBtn?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const willShow = modelPopover.hidden;
+  modelPopover.hidden = !willShow;
+  modelPickerBtn.setAttribute("aria-expanded", String(willShow));
+});
+modelPopover?.querySelectorAll(".model-option").forEach((btn) => {
+  btn.addEventListener("click", () => setModel(btn.dataset.model));
+});
+document.addEventListener("click", (event) => {
+  if (modelPopover && !modelPopover.hidden && !modelPopover.contains(event.target) && event.target !== modelPickerBtn) {
+    closeModelPopover();
+  }
+});
+applyModelToComposer();
 
 /* ---------- persistence ---------- */
 function loadChats() {
@@ -1116,18 +1193,21 @@ function renderMessages() {
 }
 
 function appendMessageEl(role, content) {
-  const { text, images } = splitContent(content);
+  const { text, images, genImages } = splitContent(content);
   const w = document.createElement("div");
   w.className = `message ${role}`;
   const imagesHtml = images.length
     ? `<div class="msg-images">${images.map((u) => `<img src="${u}" alt="Imagen adjunta">`).join("")}</div>`
+    : "";
+  const genImagesHtml = genImages.length
+    ? genImages.map((g) => generatedImageHtml(g.url, g.prompt)).join("")
     : "";
   const bodyHtml = role === "assistant" ? markdownToHtml(text) : `<p>${escapeHtml(text)}</p>`;
   const actionsHtml =
     role === "assistant" && text
       ? '<div class="msg-actions"><button type="button" class="copy-msg" aria-label="Copy message">Copy</button></div>'
       : "";
-  w.innerHTML = `<div class="avatar">${role === "assistant" ? "A" : "YOU"}</div><div class="bubble"><span class="label">${role === "assistant" ? "AZYVION AI" : "YOU"}</span>${imagesHtml}<div class="content">${bodyHtml}</div>${actionsHtml}</div>`;
+  w.innerHTML = `<div class="avatar">${role === "assistant" ? "A" : "YOU"}</div><div class="bubble"><span class="label">${role === "assistant" ? "AZYVION AI" : "YOU"}</span>${imagesHtml}${genImagesHtml}<div class="content">${bodyHtml}</div>${actionsHtml}</div>`;
   attachCodeCopyHandlers(w);
   const copyMsgBtn = w.querySelector(".copy-msg");
   if (copyMsgBtn) {
@@ -1142,17 +1222,34 @@ function appendMessageEl(role, content) {
   return w;
 }
 
-// Message content can be a plain string or an OpenAI-style array of
-// { type: "text" } / { type: "image_url" } parts — this normalizes either
-// shape into { text, images } for rendering.
+// Markup for one already-generated (Straks Imagen) image, with download /
+// open-in-new-tab actions. Shared by appendMessageEl (loading history) and
+// generateImage (a freshly generated reply).
+function generatedImageHtml(url, prompt) {
+  const safePrompt = escapeHtml(prompt || "");
+  const safeUrl = escapeHtml(url);
+  return (
+    `<div class="gen-image-wrap"><img src="${safeUrl}" alt="${safePrompt}" loading="lazy">` +
+    `<div class="gen-image-actions">` +
+    `<a href="${safeUrl}" download="straks-imagen.jpg" target="_blank" rel="noopener">Descargar</a>` +
+    `<a href="${safeUrl}" target="_blank" rel="noopener">Abrir</a>` +
+    `</div></div>`
+  );
+}
+
+// Message content can be a plain string or an array of parts:
+// OpenAI-style { type: "text" } / { type: "image_url" } (user text +
+// attached photos), plus our own { type: "generated_image" } (a Straks
+// Imagen result). Normalizes any shape into { text, images, genImages }.
 function splitContent(content) {
-  if (typeof content === "string") return { text: content, images: [] };
+  if (typeof content === "string") return { text: content, images: [], genImages: [] };
   if (Array.isArray(content)) {
     const text = content.filter((p) => p.type === "text").map((p) => p.text).join("\n");
     const images = content.filter((p) => p.type === "image_url").map((p) => p.image_url.url);
-    return { text, images };
+    const genImages = content.filter((p) => p.type === "generated_image").map((p) => ({ url: p.url, prompt: p.prompt }));
+    return { text, images, genImages };
   }
-  return { text: "", images: [] };
+  return { text: "", images: [], genImages: [] };
 }
 
 function typingEl() {
@@ -1334,6 +1431,8 @@ async function fetchChatWithRetry(messages, projectContext, attempt = 0) {
 /* ---------- sending ---------- */
 async function sendMessage(text) {
   text = (text || "").trim();
+  if (getCurrentModel().type === "image") return sendImagePrompt(text);
+
   const images = pendingImages.slice();
   if ((!text && !images.length) || send.disabled) return;
 
@@ -1460,6 +1559,82 @@ async function sendMessage(text) {
     send.disabled = false;
     input.focus();
   }
+}
+
+/* ---------- Straks Imagen (text-to-image) ----------
+   Runs entirely client-side against Pollinations' free, keyless image API
+   (https://image.pollinations.ai) — no backend/API key required, so image
+   generation works even on a static GitHub Pages deployment with no server
+   configured. The user can generate as many images as they like; each
+   prompt gets its own image with a random seed so repeating a prompt gives
+   a different result. */
+function pollinationsUrl(prompt, seed) {
+  const encoded = encodeURIComponent(prompt.slice(0, 800));
+  return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${seed}`;
+}
+
+async function sendImagePrompt(text) {
+  if (!text || send.disabled) return;
+
+  const chat = getActiveChat();
+  if (welcome.style.display !== "none") welcome.style.display = "none";
+
+  if (!chat.messages.length) chat.title = titleFrom(text);
+  chat.messages.push({ role: "user", content: text });
+  saveChats();
+  renderHistory();
+  appendMessageEl("user", text);
+  scrollToBottom();
+
+  input.value = "";
+  input.style.height = "auto";
+  send.disabled = true;
+
+  // Loading bubble: a blurred placeholder that resolves into the real
+  // image once it finishes loading, instead of a blank wait.
+  const seed = Math.floor(Math.random() * 1e9);
+  const url = pollinationsUrl(text, seed);
+  const w = document.createElement("div");
+  w.className = "message assistant";
+  w.innerHTML =
+    `<div class="avatar">A</div><div class="bubble"><span class="label">AZYVION AI</span>` +
+    `<div class="gen-image-wrap loading"><img src="${escapeHtml(url)}" alt="Generando…">` +
+    `<div class="gen-image-status"><span class="typing"><span></span><span></span><span></span></span> Generando imagen…</div></div></div>`;
+  messagesEl.appendChild(w);
+  scrollToBottom();
+
+  const img = w.querySelector("img");
+  const wrap = w.querySelector(".gen-image-wrap");
+  const status = w.querySelector(".gen-image-status");
+
+  const finish = (ok) => {
+    wrap.classList.remove("loading");
+    if (ok) {
+      const safeUrl = escapeHtml(url);
+      status.outerHTML =
+        `<div class="gen-image-actions">` +
+        `<a href="${safeUrl}" download="straks-imagen.jpg" target="_blank" rel="noopener">Descargar</a>` +
+        `<a href="${safeUrl}" target="_blank" rel="noopener">Abrir</a>` +
+        `</div>`;
+      chat.messages.push({
+        role: "assistant",
+        content: [
+          { type: "text", text: `Imagen generada a partir de: "${text}"` },
+          { type: "generated_image", url, prompt: text },
+        ],
+      });
+    } else {
+      status.textContent = "No se pudo generar la imagen. Intenta de nuevo.";
+      chat.messages.push({ role: "assistant", content: "No se pudo generar la imagen. Intenta de nuevo." });
+    }
+    saveChats();
+    send.disabled = false;
+    input.focus();
+    scrollToBottom();
+  };
+
+  img.addEventListener("load", () => finish(true), { once: true });
+  img.addEventListener("error", () => finish(false), { once: true });
 }
 
 /* Demo mode has no backend, but streams the canned reply word-by-word
