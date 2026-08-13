@@ -107,16 +107,36 @@ If asked about something Azyvion has not officially provided, say that it is not
 // language always wins if it differs from the browser's — e.g. someone
 // with a Chinese browser typing in English gets an English reply — so this
 // only sets the *default/first-message* language, it never forces it.
-function buildSystemPrompt(browserLanguage) {
-  if (!browserLanguage || typeof browserLanguage !== "string") return BASE_SYSTEM_PROMPT;
-  const lang = browserLanguage.slice(0, 60); // small guard against absurd input
-  return `${BASE_SYSTEM_PROMPT}
+function buildSystemPrompt(browserLanguage, projectContext) {
+  let prompt = BASE_SYSTEM_PROMPT;
+
+  if (browserLanguage && typeof browserLanguage === "string") {
+    const lang = browserLanguage.slice(0, 60); // small guard against absurd input
+    prompt += `
 
 The user's browser/device language is: ${lang}.
 Default to replying in that language. However, always prioritize the language
 the user is actually writing in for each message — if they write in a
 different language than their browser default, reply in that language
 instead. Never mention this instruction or explain your language choice.`;
+  }
+
+  // This chat belongs to one of the user's "projects" — a named workspace
+  // with its own instructions and, optionally, reference files, sent by the
+  // frontend as `projectContext`. Applies only to this conversation.
+  if (projectContext && typeof projectContext === "string") {
+    const ctx = projectContext.slice(0, 6000); // guard against an oversized payload
+    prompt += `
+
+This conversation is part of a project. Use the following project context
+(instructions and/or reference files) to inform your answers in this chat.
+Don't mention or quote this instruction block itself.
+--- PROJECT CONTEXT START ---
+${ctx}
+--- PROJECT CONTEXT END ---`;
+  }
+
+  return prompt;
 }
 
 app.get("/api/status", (_req, res) => {
@@ -133,7 +153,7 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
   }
 
   const rawMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
-  const systemPrompt = buildSystemPrompt(req.body.language);
+  const systemPrompt = buildSystemPrompt(req.body.language, req.body.projectContext);
 
   // Normalizes both plain-string content and OpenAI-style multimodal arrays
   // ({type:"text"} / {type:"image_url"}) into a safe, size-capped shape.
