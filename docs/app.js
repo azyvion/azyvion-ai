@@ -36,6 +36,7 @@ async function loadFirebaseSdk() {
 
 const API_BASE = (window.AZYVION_CONFIG && window.AZYVION_CONFIG.API_BASE_URL) || "";
 const STORAGE_KEY = "azyvion_ai_chats_v1";
+const PROJECTS_STORAGE_KEY = "azyvion_ai_projects_v1";
 const FIREBASE_CONFIG = window.AZYVION_CONFIG?.FIREBASE || {};
 const FIREBASE_ENABLED = Boolean(FIREBASE_CONFIG.apiKey && !String(FIREBASE_CONFIG.apiKey).startsWith("PASTE_"));
 
@@ -72,7 +73,19 @@ const appEl = document.querySelector(".app"),
   signOutBtn = document.getElementById("signOutBtn"),
   settingsBtn = document.getElementById("settingsBtn"),
   settingsOverlay = document.getElementById("settingsOverlay"),
-  settingsClose = document.getElementById("settingsClose");
+  settingsClose = document.getElementById("settingsClose"),
+  projectsListEl = document.getElementById("projectsList"),
+  newProjectBtn = document.getElementById("newProjectBtn"),
+  projectOverlay = document.getElementById("projectOverlay"),
+  projectModalTitle = document.getElementById("projectModalTitle"),
+  projectModalClose = document.getElementById("projectModalClose"),
+  projectNameInput = document.getElementById("projectName"),
+  projectInstructionsInput = document.getElementById("projectInstructions"),
+  projectFileInput = document.getElementById("projectFileInput"),
+  projectFileBtn = document.getElementById("projectFileBtn"),
+  projectFilesListEl = document.getElementById("projectFilesList"),
+  projectDeleteBtn = document.getElementById("projectDeleteBtn"),
+  projectSaveBtn = document.getElementById("projectSaveBtn");
 
 const MAX_IMAGES = 5; // Groq's qwen3.6-27b vision model accepts up to 5 images per request
 let pendingImages = []; // [{ dataUrl, name }] queued for the next message
@@ -88,6 +101,16 @@ let authRequired = FIREBASE_ENABLED;
 let chats = loadChats();
 let activeId;
 activeId = chats.length ? chats[0].id : createChat();
+
+// Projects: a chat with a projectId belongs to that project and is shown
+// nested under it in the sidebar instead of in "Recientes" — chats with no
+// projectId (personal chats) stay in "Recientes". Both live in the same
+// `chats` array and sync to the same per-user cloud account, so nothing
+// about how a chat is stored/synced changes — only how it's grouped in the UI.
+let projects = loadProjects();
+const expandedProjectIds = new Set(); // which project rows are expanded (UI-only, not persisted)
+let editingProjectId = null; // project currently open in the project modal, null = creating new
+let editingFiles = []; // working copy of the project's attached files while the modal is open
 
 /* ---------- persistence ---------- */
 function loadChats() {
@@ -109,15 +132,78 @@ function saveChats() {
   queueCloudSync();
 }
 
-function createChat() {
+function createChat(projectId = null) {
   const id = `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  chats.unshift({ id, title: "New chat", messages: [] });
+  chats.unshift({ id, title: "New chat", messages: [], projectId: projectId || null });
   saveChats();
   return id;
 }
 
 function getActiveChat() {
   return chats.find((c) => c.id === activeId);
+}
+
+/* ---------- projects ---------- */
+function loadProjects() {
+  try {
+    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveProjects() {
+  try {
+    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+  } catch {
+    /* storage unavailable — projects still work for this session */
+  }
+}
+
+function getProject(id) {
+  return projects.find((p) => p.id === id) || null;
+}
+
+function createProject(name, instructions, files) {
+  const id = `p_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  projects.unshift({
+    id,
+    name: name || "Untitled project",
+    instructions: instructions || "",
+    files: Array.isArray(files) ? files : [],
+  });
+  saveProjects();
+  queueCloudSyncProject(id);
+  return id;
+}
+
+function updateProject(id, patch) {
+  const p = getProject(id);
+  if (!p) return;
+  Object.assign(p, patch);
+  saveProjects();
+  queueCloudSyncProject(id);
+}
+
+function deleteProject(id) {
+  const idx = projects.findIndex((p) => p.id === id);
+  if (idx === -1) return;
+  projects.splice(idx, 1);
+  // Chats that belonged to this project become personal chats instead of
+  // being deleted with it — losing a project shouldn't lose conversations.
+  let chatsChanged = false;
+  chats.forEach((c) => {
+    if (c.projectId === id) {
+      c.projectId = null;
+      chatsChanged = true;
+    }
+  });
+  if (chatsChanged) saveChats();
+  expandedProjectIds.delete(id);
+  saveProjects();
+  deleteCloudProject(id);
 }
 
 /* ---------- authentication + cloud sync ---------- */
@@ -182,9 +268,22 @@ function cleanForCloud(content) {
 function cloudChat(chat) {
   return {
     title: (chat.title || "New chat").slice(0, 120),
+    projectId: chat.projectId || null,
     messages: (chat.messages || []).slice(-100).map((m) => ({
       role: m.role === "assistant" ? "assistant" : "user",
       content: cleanForCloud(m.content),
+    })),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+function cloudProject(project) {
+  return {
+    name: (project.name || "Untitled project").slice(0, 120),
+    instructions: (project.instructions || "").slice(0, 8000),
+    files: (project.files || []).slice(0, 8).map((f) => ({
+      name: (f.name || "file").slice(0, 120),
+      content: (f.content || "").slice(0, 20000),
     })),
     updatedAt: serverTimestamp(),
   };
@@ -233,6 +332,7 @@ async function loadCloudChats() {
       cloud.push({
         id: d.id,
         title: data.title || "New chat",
+        projectId: data.projectId || null,
         messages: Array.isArray(data.messages) ? data.messages.map((m) => ({
           role: m.role === "assistant" ? "assistant" : "user",
           content: typeof m.content === "string" ? m.content : "",
@@ -249,6 +349,65 @@ async function loadCloudChats() {
     renderMessages();
   } catch (err) {
     console.warn("Cloud history unavailable", err);
+  }
+}
+
+let projectSyncTimer = null;
+const projectSyncQueue = new Set();
+function queueCloudSyncProject(projectId) {
+  if (!cloudSyncReady || !currentUser || !projectId) return;
+  projectSyncQueue.add(projectId);
+  clearTimeout(projectSyncTimer);
+  projectSyncTimer = setTimeout(flushCloudSyncProjects, 500);
+}
+
+async function flushCloudSyncProjects() {
+  if (!cloudSyncReady || !currentUser || !db) return;
+  const ids = [...projectSyncQueue];
+  projectSyncQueue.clear();
+  for (const id of ids) {
+    const project = getProject(id);
+    if (!project) continue;
+    try {
+      await setDoc(doc(db, "users", currentUser.uid, "projects", id), cloudProject(project), { merge: true });
+    } catch (err) {
+      console.warn("Project cloud sync failed", err);
+    }
+  }
+}
+
+async function deleteCloudProject(id) {
+  if (!cloudSyncReady || !currentUser || !db) return;
+  try {
+    await deleteDoc(doc(db, "users", currentUser.uid, "projects", id));
+  } catch (err) {
+    console.warn("Project cloud delete failed", err);
+  }
+}
+
+async function loadCloudProjects() {
+  if (!cloudSyncReady || !currentUser || !db) return;
+  try {
+    const snap = await getDocs(query(collection(db, "users", currentUser.uid, "projects")));
+    const cloud = [];
+    snap.forEach((d) => {
+      const data = d.data() || {};
+      cloud.push({
+        id: d.id,
+        name: data.name || "Untitled project",
+        instructions: data.instructions || "",
+        files: Array.isArray(data.files)
+          ? data.files.map((f) => ({ name: f.name || "file", content: f.content || "" }))
+          : [],
+      });
+    });
+    const byId = new Map(projects.map((p) => [p.id, p]));
+    for (const p of cloud) byId.set(p.id, p);
+    projects = [...byId.values()];
+    saveProjects();
+    renderHistory();
+  } catch (err) {
+    console.warn("Cloud projects unavailable", err);
   }
 }
 
@@ -321,6 +480,7 @@ async function initializeAuth() {
         setAccount(user);
         showAuth(false);
         await loadCloudChats();
+        await loadCloudProjects();
         updateWelcomeGreeting(user);
         setStatus("ready", "Signed in");
       } else {
@@ -394,8 +554,11 @@ signOutBtn?.addEventListener("click", async () => {
   // unsynced was already pushed to the cloud by the debounce in
   // queueCloudSync before this point.
   chats = [];
+  projects = [];
+  expandedProjectIds.clear();
   try {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(PROJECTS_STORAGE_KEY);
   } catch {
     /* storage unavailable */
   }
@@ -448,44 +611,237 @@ settingsTabButtons.forEach((btn) => {
 initializeAuth();
 
 /* ---------- sidebar rendering ---------- */
+// Builds one clickable history row — shared between "Recientes" (personal
+// chats, no project) and the chat list nested under each project, so both
+// look and behave identically.
+function buildChatItem(c) {
+  const item = document.createElement("div");
+  item.className = `h-item${c.id === activeId ? " active" : ""}`;
+  item.setAttribute("role", "button");
+  item.setAttribute("tabindex", "0");
+  item.setAttribute("aria-current", c.id === activeId ? "true" : "false");
+  const label = document.createElement("span");
+  label.textContent = c.title || "New chat";
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "del";
+  del.setAttribute("aria-label", "Delete chat");
+  del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();
+    deleteChat(c.id);
+  });
+  item.appendChild(label);
+  item.appendChild(del);
+  item.addEventListener("click", () => switchChat(c.id));
+  item.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      switchChat(c.id);
+    }
+  });
+  return item;
+}
+
 function renderHistory() {
   historyEl.innerHTML = "";
-  if (!chats.length) {
+  // Only chats with no projectId ("personal" chats) show under Recientes —
+  // chats that belong to a project are rendered nested under it instead by
+  // renderProjects() below. Both are part of the same synced account.
+  const personalChats = chats.filter((c) => !c.projectId);
+  if (!personalChats.length) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
     empty.textContent = "No conversations yet.";
     historyEl.appendChild(empty);
-    return;
+  } else {
+    personalChats.forEach((c) => historyEl.appendChild(buildChatItem(c)));
   }
-  chats.forEach((c) => {
+  renderProjects();
+}
+
+function renderProjects() {
+  if (!projectsListEl) return;
+  projectsListEl.innerHTML = "";
+  projects.forEach((p) => {
+    const expanded = expandedProjectIds.has(p.id);
+
     const item = document.createElement("div");
-    item.className = `h-item${c.id === activeId ? " active" : ""}`;
-    item.setAttribute("role", "button");
-    item.setAttribute("tabindex", "0");
-    item.setAttribute("aria-current", c.id === activeId ? "true" : "false");
-    const label = document.createElement("span");
-    label.textContent = c.title || "New chat";
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "del";
-    del.setAttribute("aria-label", "Delete chat");
-    del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
-    del.addEventListener("click", (e) => {
+    item.className = "project-item";
+
+    const row = document.createElement("div");
+    row.className = "project-row";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "proj-toggle";
+    toggle.textContent = expanded ? "▾" : "▸";
+    toggle.setAttribute("aria-label", expanded ? "Collapse project" : "Expand project");
+
+    const name = document.createElement("span");
+    name.className = "proj-name";
+    name.textContent = p.name || "Untitled project";
+    name.title = p.name || "Untitled project";
+
+    const toggleExpanded = () => {
+      if (expandedProjectIds.has(p.id)) expandedProjectIds.delete(p.id);
+      else expandedProjectIds.add(p.id);
+      renderProjects();
+    };
+    toggle.addEventListener("click", toggleExpanded);
+    name.addEventListener("click", toggleExpanded);
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "proj-add";
+    addBtn.setAttribute("aria-label", "New chat in this project");
+    addBtn.textContent = "+";
+    addBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      deleteChat(c.id);
+      expandedProjectIds.add(p.id);
+      activeId = createChat(p.id);
+      renderHistory();
+      renderMessages();
+      closeSidebarOnMobile();
+      input.focus();
     });
-    item.appendChild(label);
-    item.appendChild(del);
-    item.addEventListener("click", () => switchChat(c.id));
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        switchChat(c.id);
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "proj-edit";
+    editBtn.setAttribute("aria-label", "Edit project");
+    editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.3 2.3a1.6 1.6 0 0 1 2.4 2.4L5.5 12.9l-3 .7.7-3 8.1-8.3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openProjectModal(p);
+    });
+
+    row.appendChild(toggle);
+    row.appendChild(name);
+    row.appendChild(addBtn);
+    row.appendChild(editBtn);
+    item.appendChild(row);
+
+    if (expanded) {
+      const chatsWrap = document.createElement("div");
+      chatsWrap.className = "project-chats";
+      const projectChats = chats.filter((c) => c.projectId === p.id);
+      if (!projectChats.length) {
+        const empty = document.createElement("div");
+        empty.className = "history-empty";
+        empty.textContent = "No chats in this project yet.";
+        chatsWrap.appendChild(empty);
+      } else {
+        projectChats.forEach((c) => chatsWrap.appendChild(buildChatItem(c)));
       }
-    });
-    historyEl.appendChild(item);
+      item.appendChild(chatsWrap);
+    }
+
+    projectsListEl.appendChild(item);
   });
 }
+
+/* ---------- project modal ---------- */
+function openProjectModal(project) {
+  editingProjectId = project ? project.id : null;
+  editingFiles = project ? (project.files || []).map((f) => ({ ...f })) : [];
+  projectModalTitle.textContent = project ? "Editar proyecto" : "New project";
+  projectNameInput.value = project ? project.name || "" : "";
+  projectInstructionsInput.value = project ? project.instructions || "" : "";
+  projectDeleteBtn.hidden = !project;
+  renderProjectFilesList();
+  projectOverlay.hidden = false;
+  projectNameInput.focus();
+}
+
+function closeProjectModal() {
+  projectOverlay.hidden = true;
+}
+
+const MAX_PROJECT_FILES = 8;
+const MAX_PROJECT_FILE_CHARS = 20000; // keeps project docs small enough for cloud sync + the AI's context window
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+}
+
+function renderProjectFilesList() {
+  projectFilesListEl.innerHTML = "";
+  editingFiles.forEach((f, i) => {
+    const row = document.createElement("div");
+    row.className = "project-file-row";
+    const span = document.createElement("span");
+    span.textContent = f.name;
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "rm-file";
+    rm.setAttribute("aria-label", "Remove file");
+    rm.textContent = "✕";
+    rm.addEventListener("click", () => {
+      editingFiles.splice(i, 1);
+      renderProjectFilesList();
+    });
+    row.appendChild(span);
+    row.appendChild(rm);
+    projectFilesListEl.appendChild(row);
+  });
+}
+
+newProjectBtn?.addEventListener("click", () => openProjectModal(null));
+projectModalClose?.addEventListener("click", closeProjectModal);
+projectOverlay?.addEventListener("click", (e) => {
+  if (e.target === projectOverlay) closeProjectModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && projectOverlay && !projectOverlay.hidden) closeProjectModal();
+});
+
+projectFileBtn?.addEventListener("click", () => projectFileInput.click());
+projectFileInput?.addEventListener("change", async () => {
+  const files = Array.from(projectFileInput.files || []);
+  projectFileInput.value = ""; // allow re-selecting the same file later
+  for (const file of files) {
+    if (editingFiles.length >= MAX_PROJECT_FILES) break;
+    try {
+      const text = await readFileAsText(file);
+      editingFiles.push({ name: file.name, content: text.slice(0, MAX_PROJECT_FILE_CHARS) });
+    } catch {
+      /* skip files the browser can't read as text */
+    }
+  }
+  renderProjectFilesList();
+});
+
+projectSaveBtn?.addEventListener("click", () => {
+  const name = projectNameInput.value.trim();
+  if (!name) {
+    projectNameInput.focus();
+    return;
+  }
+  const instructions = projectInstructionsInput.value.trim();
+  const filesSnapshot = editingFiles.map((f) => ({ ...f }));
+  if (editingProjectId) {
+    updateProject(editingProjectId, { name, instructions, files: filesSnapshot });
+  } else {
+    const id = createProject(name, instructions, filesSnapshot);
+    expandedProjectIds.add(id);
+  }
+  closeProjectModal();
+  renderHistory();
+});
+
+projectDeleteBtn?.addEventListener("click", () => {
+  if (!editingProjectId) return;
+  if (!confirm("¿Eliminar este proyecto? Sus chats pasarán a tus chats personales.")) return;
+  deleteProject(editingProjectId);
+  closeProjectModal();
+  renderHistory();
+});
 
 function switchChat(id) {
   activeId = id;
@@ -925,20 +1281,41 @@ function getBrowserLanguage() {
   }
 }
 
+// If the active chat belongs to a project, folds that project's instructions
+// and attached files into a single string the backend can drop into the
+// system prompt — this is what makes a project's context actually apply to
+// its chats, not just organize them visually in the sidebar.
+function buildProjectContext(chat) {
+  if (!chat || !chat.projectId) return "";
+  const project = getProject(chat.projectId);
+  if (!project) return "";
+  const parts = [];
+  if (project.name) parts.push(`Project name: ${project.name}`);
+  if (project.instructions) parts.push(project.instructions.slice(0, 3000));
+  (project.files || []).slice(0, 5).forEach((f) => {
+    parts.push(`--- File: ${f.name} ---\n${(f.content || "").slice(0, 3000)}`);
+  });
+  return parts.join("\n\n").slice(0, 6000);
+}
+
 // A Render free-tier backend that's asleep can reject or drop the very
 // first request while it spins up. One silent retry after a short pause
 // turns that into "worked, just a bit slower" instead of a visible error.
-async function fetchChatWithRetry(messages, attempt = 0) {
+async function fetchChatWithRetry(messages, projectContext, attempt = 0) {
   try {
     return await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, language: getBrowserLanguage() }),
+      body: JSON.stringify({
+        messages,
+        language: getBrowserLanguage(),
+        projectContext: projectContext || undefined,
+      }),
     });
   } catch (e) {
     if (attempt === 0) {
       await new Promise((res) => setTimeout(res, 2500));
-      return fetchChatWithRetry(messages, attempt + 1);
+      return fetchChatWithRetry(messages, projectContext, attempt + 1);
     }
     throw e;
   }
@@ -1000,7 +1377,7 @@ async function sendMessage(text) {
   let stream = null;
   let full = "";
   try {
-    const r = await fetchChatWithRetry(chat.messages);
+    const r = await fetchChatWithRetry(chat.messages, buildProjectContext(chat));
     if (!r.ok) {
       let msg = "Request failed";
       try {
