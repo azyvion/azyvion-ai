@@ -216,6 +216,16 @@ function showAuth(show, note = "Sign in with Google to sync your Azyvion AI conv
   authOverlay.hidden = !show;
   document.body.classList.toggle("auth-locked", show);
   if (authNote) authNote.textContent = note;
+  // Every time the overlay is opened, reset the Google button back to its
+  // clickable state. Without this, a *successful* sign-in leaves the button
+  // permanently disabled (it was only ever re-enabled in the error branch of
+  // signInGoogle()), so the next time the overlay reappears — after signing
+  // out, or after picking "Continue without an account" and later tapping
+  // the account card to log in — the button looks stuck/greyed out.
+  if (show && googleSignInBtn) {
+    googleSignInBtn.disabled = false;
+    googleSignInBtn.classList.remove("loading");
+  }
 }
 
 function setAccount(user) {
