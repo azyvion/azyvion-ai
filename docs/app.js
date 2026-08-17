@@ -197,6 +197,20 @@ document.addEventListener("click", (event) => {
 });
 applyModelToComposer();
 
+// True when there's a real backend to talk to: either an explicit
+// API_BASE_URL in config.js, or we're running locally against
+// `node server.js` (which also serves /docs itself). False on a bare
+// static deployment (e.g. GitHub Pages) with no backend configured — used
+// to gate both text sending (see sendMessage) and the voice button.
+function isBackendConfigured() {
+  return Boolean(
+    API_BASE ||
+      window.location.protocol === "http:" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+  );
+}
+
 /* ---------- persistence ---------- */
 function loadChats() {
   try {
@@ -1350,7 +1364,7 @@ function setStatus(status, text) {
 }
 
 async function checkStatus(isRetry = false) {
-  if (!API_BASE && window.location.protocol !== "http:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+  if (!isBackendConfigured()) {
     enterDemoMode("No backend configured for this deployment.", true);
     return;
   }
@@ -1426,11 +1440,12 @@ function buildProjectContext(chat) {
 // A Render free-tier backend that's asleep can reject or drop the very
 // first request while it spins up. One silent retry after a short pause
 // turns that into "worked, just a bit slower" instead of a visible error.
-async function fetchChatWithRetry(messages, projectContext, attempt = 0) {
+async function fetchChatWithRetry(messages, projectContext, attempt = 0, signal) {
   try {
     return await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({
         messages,
         language: getBrowserLanguage(),
@@ -1438,18 +1453,35 @@ async function fetchChatWithRetry(messages, projectContext, attempt = 0) {
       }),
     });
   } catch (e) {
+    if (e.name === "AbortError") throw e; // deliberate cancel (voice barge-in) — don't retry it
     if (attempt === 0) {
       await new Promise((res) => setTimeout(res, 2500));
-      return fetchChatWithRetry(messages, projectContext, attempt + 1);
+      return fetchChatWithRetry(messages, projectContext, attempt + 1, signal);
     }
     throw e;
   }
 }
 
-/* ---------- sending ---------- */
-async function sendMessage(text) {
+/* ---------- sending ----------
+   opts is used by the voice conversation feature (see voice.js) to reuse
+   this exact same pipeline — same history, same project context, same
+   backend/model — instead of talking to /api/chat separately:
+     - voice: true        skip the image-model branch; voice always talks
+                           to the reasoning model, never Straks Imagen.
+     - signal: AbortSignal lets a barge-in (user interrupts while the
+                           reply is still streaming) cancel the fetch.
+     - onDelta(text)       called with each streamed chunk, so voice.js can
+                           synthesize speech sentence-by-sentence as it
+                           arrives instead of waiting for the full reply.
+     - onDone(fullText)    called once the reply has finished streaming.
+     - onAborted(partial)  called instead of onDone/onError when `signal`
+                           was aborted; `partial` is whatever had streamed
+                           in before the interruption.
+     - onError(err)        called on a real failure (not a deliberate abort).
+*/
+async function sendMessage(text, opts = {}) {
   text = (text || "").trim();
-  if (getCurrentModel().type === "image") return sendImagePrompt(text);
+  if (!opts.voice && getCurrentModel().type === "image") return sendImagePrompt(text);
 
   const images = pendingImages.slice();
   if ((!text && !images.length) || send.disabled) return;
@@ -1484,19 +1516,15 @@ async function sendMessage(text) {
   // truly no backend configured for this deployment at all. Everything
   // else gets a real attempt against /api/chat, so a backend that woke up
   // since page load still works without a manual refresh.
-  const noBackendConfigured =
-    !API_BASE &&
-    window.location.protocol !== "http:" &&
-    window.location.hostname !== "localhost" &&
-    window.location.hostname !== "127.0.0.1";
-
-  if (noBackendConfigured) {
+  if (!isBackendConfigured()) {
     const reply = "This is a static preview — no backend is connected here. Deploy server.js (see README) and set API_BASE_URL in config.js to enable real responses.";
     await streamDemoReply(reply);
     chat.messages.push({ role: "assistant", content: reply });
     saveChats();
+    opts.onDelta?.(reply);
+    opts.onDone?.(reply);
     send.disabled = false;
-    input.focus();
+    if (!opts.voice) input.focus();
     return;
   }
 
@@ -1504,7 +1532,7 @@ async function sendMessage(text) {
   let stream = null;
   let full = "";
   try {
-    const r = await fetchChatWithRetry(chat.messages, buildProjectContext(chat));
+    const r = await fetchChatWithRetry(chat.messages, buildProjectContext(chat), 0, opts.signal);
     if (!r.ok) {
       let msg = "Request failed";
       try {
@@ -1547,6 +1575,7 @@ async function sendMessage(text) {
         if (eventType === "delta" && payload.text) {
           full += payload.text;
           stream.push(payload.text);
+          opts.onDelta?.(payload.text);
         } else if (eventType === "error") {
           throw new Error(payload.error || "Something went wrong.");
         }
@@ -1560,22 +1589,40 @@ async function sendMessage(text) {
       // until the next reload.
       stream.el.querySelector(".stream-text").textContent = "I couldn't generate a response.";
     }
-    chat.messages.push({ role: "assistant", content: full || "I couldn't generate a response." });
+    const finalText = full || "I couldn't generate a response.";
+    chat.messages.push({ role: "assistant", content: finalText });
     saveChats();
+    opts.onDone?.(finalText);
   } catch (e) {
-    if (!stream) {
+    if (e.name === "AbortError") {
+      // Deliberate interruption (voice barge-in), not a failure — keep
+      // whatever text had already streamed in as the assistant's message
+      // instead of showing an error.
+      t.remove();
+      if (stream) stream.finish();
+      if (full) {
+        chat.messages.push({ role: "assistant", content: full });
+        saveChats();
+      } else if (stream) {
+        stream.el.remove();
+      }
+      opts.onAborted?.(full);
+    } else if (!stream) {
       t.remove();
       appendMessageEl("assistant", `I couldn't connect right now. ${e.message}`);
+      opts.onError?.(e);
     } else if (!full) {
       stream.finish();
       stream.el.querySelector(".stream-text").textContent = `I couldn't connect right now. ${e.message}`;
+      opts.onError?.(e);
     } else {
       stream.finish();
+      opts.onError?.(e);
     }
   } finally {
     scrollToBottom();
     send.disabled = false;
-    input.focus();
+    if (!opts.voice) input.focus();
   }
 }
 
@@ -1900,3 +1947,12 @@ window.addEventListener("appinstalled", () => {
 if (isIOS && !isStandaloneApp()) {
   showInstallBanner("ios");
 }
+
+/* ---------- exports for voice.js ----------
+   The voice conversation feature (docs/voice.js) is a separate module so
+   it only loads/runs the mic + speech-synthesis machinery when actually
+   needed. It reuses sendMessage() itself — same chat history, same
+   project context, same backend/model — rather than talking to /api/chat
+   on its own, so a voice turn has exactly the same reasoning, context, and
+   personality as typing would. */
+export { API_BASE, sendMessage, isBackendConfigured };
