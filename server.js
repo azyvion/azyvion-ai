@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -52,6 +52,24 @@ const dailyLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Se alcanzó el límite diario de mensajes. Vuelve a intentarlo mañana." },
+});
+
+// Separate, looser limits for /api/voice/transcribe: one real conversation
+// turn fires an STT call every few seconds (much more often than typed
+// chat messages), so it needs its own budget instead of sharing chatLimiter.
+const voiceLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_VOICE_PER_MINUTE || 40),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Estás hablando muy rápido para el sistema. Espera un momento e intenta de nuevo." },
+});
+const voiceDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  limit: Number(process.env.RATE_LIMIT_VOICE_PER_DAY || 400),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Se alcanzó el límite diario de conversación por voz. Vuelve a intentarlo mañana." },
 });
 
 // Serves the static frontend too (index.html, app.js, styles.css, etc. live
@@ -284,6 +302,64 @@ app.post("/api/chat", chatLimiter, dailyLimiter, async (req, res) => {
     res.end();
   }
 });
+
+// Maps the MediaRecorder mimeType the browser sends as Content-Type into a
+// filename extension, since Groq/Whisper infers the audio container from
+// the filename rather than the header. Every mainstream browser's
+// MediaRecorder produces one of these; webm is the safe default (Chrome,
+// Firefox, Edge all support it natively).
+function extensionForMimeType(mime) {
+  const m = (mime || "").toLowerCase();
+  if (m.includes("mp4") || m.includes("m4a")) return "m4a";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  return "webm";
+}
+
+// Speech-to-text for the voice conversation feature. Takes the raw audio
+// blob recorded by the browser (whatever container its MediaRecorder
+// supports — see extensionForMimeType) and transcribes it with Groq's
+// hosted Whisper Large v3 Turbo: fast, multilingual (handles Spanish,
+// English, and natural switching between them mid-sentence), and reuses
+// the same GROQ_API_KEY already configured for chat — no new provider or
+// credential to manage. The key never reaches the browser: this route is
+// the only thing that talks to Groq's audio API.
+app.post(
+  "/api/voice/transcribe",
+  voiceLimiter,
+  voiceDailyLimiter,
+  express.raw({ type: () => true, limit: "15mb" }),
+  async (req, res) => {
+    if (!client) {
+      return res
+        .status(503)
+        .json({ error: "Azyvion AI is not configured yet. Add GROQ_API_KEY to .env." });
+    }
+    if (!Buffer.isBuffer(req.body) || !req.body.length) {
+      return res.status(400).json({ error: "No audio was received." });
+    }
+
+    try {
+      const contentType = req.headers["content-type"] || undefined;
+      const ext = extensionForMimeType(contentType);
+      const transcription = await client.audio.transcriptions.create({
+        file: await toFile(req.body, `speech.${ext}`, { type: contentType }),
+        model: "whisper-large-v3-turbo",
+        response_format: "json",
+        temperature: 0,
+        // No `language` pinned on purpose — conversations naturally switch
+        // between Spanish and English mid-turn, and Whisper's own
+        // per-utterance language detection handles that better than a
+        // fixed hint would.
+      });
+      res.json({ text: (transcription?.text || "").trim() });
+    } catch (e) {
+      console.error("Voice transcription error:", e);
+      res.status(502).json({ error: "Couldn't understand the audio. Please try again." });
+    }
+  }
+);
 
 app.listen(port, () => {
   console.log(`Azyvion AI: http://localhost:${port}`);
